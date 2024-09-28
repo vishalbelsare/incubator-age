@@ -19,19 +19,20 @@
 
 #include "postgres.h"
 
+#include "access/heapam.h"
 #include "catalog/namespace.h"
+#include "common/hashfn.h"
+#include "commands/label_commands.h"
+#include "utils/datum.h"
 #include "utils/lsyscache.h"
 #include "utils/memutils.h"
-#include "utils/rel.h"
 #include "utils/snapmgr.h"
-#include "commands/label_commands.h"
 
 #include "utils/age_global_graph.h"
-#include "utils/agtype.h"
 #include "catalog/ag_graph.h"
 #include "catalog/ag_label.h"
-#include "utils/graphid.h"
-#include "utils/age_graphid_ds.h"
+
+#include <pthread.h>
 
 /* defines */
 #define VERTEX_HTAB_NAME "Vertex to edge lists " /* added a space at end for */
@@ -41,7 +42,7 @@
 
 /* internal data structures implementation */
 
-/* vertex entry for the vertex_hastable */
+/* vertex entry for the vertex_hashtable */
 typedef struct vertex_entry
 {
     graphid vertex_id;             /* vertex id, it is also the hash key */
@@ -79,15 +80,26 @@ typedef struct GRAPH_global_context
     int64 num_loaded_vertices;     /* number of loaded vertices in this graph */
     int64 num_loaded_edges;        /* number of loaded edges in this graph */
     ListGraphId *vertices;         /* vertices for vertex hashtable cleanup */
+    ListGraphId *edges;            /* edges for edge hashtable cleanup */
     struct GRAPH_global_context *next; /* next graph */
 } GRAPH_global_context;
 
-/* global variable to hold the per process GRAPH global context */
-static GRAPH_global_context *global_graph_contexts = NULL;
+/* container for GRAPH_global_context and its mutex */
+typedef struct GRAPH_global_context_container
+{
+    /* head of the list */
+    GRAPH_global_context *contexts;
+
+    /* mutex to protect the list */
+    pthread_mutex_t mutex_lock;
+} GRAPH_global_context_container;
+
+/* global variable to hold the per process GRAPH global contexts */
+static GRAPH_global_context_container global_graph_contexts_container = {0};
 
 /* declarations */
 /* GRAPH global context functions */
-static void free_specific_GRAPH_global_context(GRAPH_global_context *ggctx);
+static bool free_specific_GRAPH_global_context(GRAPH_global_context *ggctx);
 static bool delete_specific_GRAPH_global_contexts(char *graph_name);
 static bool delete_GRAPH_global_contexts(void);
 static void create_GRAPH_global_hashtables(GRAPH_global_context *ggctx);
@@ -97,12 +109,12 @@ static void load_edge_hashtable(GRAPH_global_context *ggctx);
 static void freeze_GRAPH_global_hashtables(GRAPH_global_context *ggctx);
 static List *get_ag_labels_names(Snapshot snapshot, Oid graph_oid,
                                  char label_type);
-static bool insert_edge(GRAPH_global_context *ggctx, graphid edge_id,
-                        Datum edge_properties, graphid start_vertex_id,
-                        graphid end_vertex_id, Oid edge_label_table_oid);
+static bool insert_edge_entry(GRAPH_global_context *ggctx, graphid edge_id,
+                              Datum edge_properties, graphid start_vertex_id,
+                              graphid end_vertex_id, Oid edge_label_table_oid);
 static bool insert_vertex_edge(GRAPH_global_context *ggctx,
                                graphid start_vertex_id, graphid end_vertex_id,
-                               graphid edge_id);
+                               graphid edge_id, char *edge_label_name);
 static bool insert_vertex_entry(GRAPH_global_context *ggctx, graphid vertex_id,
                                 Oid vertex_label_table_oid,
                                 Datum vertex_properties);
@@ -110,7 +122,7 @@ static bool insert_vertex_entry(GRAPH_global_context *ggctx, graphid vertex_id,
 
 /*
  * Helper function to determine validity of the passed GRAPH_global_context.
- * This is based off of the current active snaphot, to see if the graph could
+ * This is based off of the current active snapshot, to see if the graph could
  * have been modified. Ideally, we should find a way to more accurately know
  * whether the particular graph was modified.
  */
@@ -170,7 +182,7 @@ static void create_GRAPH_global_hashtables(GRAPH_global_context *ggctx)
     ggctx->vertex_hashtable = hash_create(vhn, VERTEX_HTAB_INITIAL_SIZE,
                                           &vertex_ctl,
                                           HASH_ELEM | HASH_FUNCTION);
-    pfree(vhn);
+    pfree_if_not_null(vhn);
 
     /* initialize the edge hashtable */
     MemSet(&edge_ctl, 0, sizeof(edge_ctl));
@@ -179,7 +191,7 @@ static void create_GRAPH_global_hashtables(GRAPH_global_context *ggctx)
     edge_ctl.hash = tag_hash;
     ggctx->edge_hashtable = hash_create(ehn, EDGE_HTAB_INITIAL_SIZE, &edge_ctl,
                                         HASH_ELEM | HASH_FUNCTION);
-    pfree(ehn);
+    pfree_if_not_null(ehn);
 }
 
 /* helper function to get a List of all label names for the specified graph */
@@ -189,7 +201,7 @@ static List *get_ag_labels_names(Snapshot snapshot, Oid graph_oid,
     List *labels = NIL;
     ScanKeyData scan_keys[2];
     Relation ag_label;
-    HeapScanDesc scan_desc;
+    TableScanDesc scan_desc;
     HeapTuple tuple;
     TupleDesc tupdesc;
 
@@ -203,8 +215,8 @@ static List *get_ag_labels_names(Snapshot snapshot, Oid graph_oid,
                 F_CHAREQ, CharGetDatum(label_type));
 
     /* setup the table to be scanned, ag_label in this case */
-    ag_label = heap_open(ag_label_relation_id(), ShareLock);
-    scan_desc = heap_beginscan(ag_label, snapshot, 2, scan_keys);
+    ag_label = table_open(ag_label_relation_id(), ShareLock);
+    scan_desc = table_beginscan(ag_label, snapshot, 2, scan_keys);
 
     /* get the tupdesc - we don't need to release this one */
     tupdesc = RelationGetDescr(ag_label);
@@ -228,8 +240,8 @@ static List *get_ag_labels_names(Snapshot snapshot, Oid graph_oid,
     }
 
     /* close up scan */
-    heap_endscan(scan_desc);
-    heap_close(ag_label, ShareLock);
+    table_endscan(scan_desc);
+    table_close(ag_label, ShareLock);
 
     return labels;
 }
@@ -238,39 +250,60 @@ static List *get_ag_labels_names(Snapshot snapshot, Oid graph_oid,
  * Helper function to insert one edge/edge->vertex, key/value pair, in the
  * current GRAPH global edge hashtable.
  */
-static bool insert_edge(GRAPH_global_context *ggctx, graphid edge_id,
-                        Datum edge_properties, graphid start_vertex_id,
-                        graphid end_vertex_id, Oid edge_label_table_oid)
+static bool insert_edge_entry(GRAPH_global_context *ggctx, graphid edge_id,
+                              Datum edge_properties, graphid start_vertex_id,
+                              graphid end_vertex_id, Oid edge_label_table_oid)
 {
-    edge_entry *value = NULL;
+    edge_entry *ee = NULL;
     bool found = false;
 
     /* search for the edge */
-    value = (edge_entry *)hash_search(ggctx->edge_hashtable, (void *)&edge_id,
+    ee = (edge_entry *)hash_search(ggctx->edge_hashtable, (void *)&edge_id,
                                       HASH_ENTER, &found);
+
+    /* if the hash enter returned is NULL, error out */
+    if (ee == NULL)
+    {
+        elog(ERROR, "insert_edge_entry: hash table returned NULL for ee");
+    }
+
     /*
      * If we found the key, either we have a duplicate, or we made a mistake and
      * inserted it already. Either way, this isn't good so don't insert it and
-     * return false. Likewise, if the value returned is NULL, don't do anything,
-     * just return false. This way the caller can decide what to do.
+     * return false.
      */
-    if (found || value == NULL)
+    if (found)
     {
+        ereport(WARNING,
+                (errcode(ERRCODE_DATA_EXCEPTION),
+                 errmsg("edge: [id: %ld, start: %ld, end: %ld, label oid: %d] %s",
+                        edge_id, start_vertex_id, end_vertex_id,
+                        edge_label_table_oid, "duplicate edge found")));
+
+        ereport(WARNING,
+                (errcode(ERRCODE_DATA_EXCEPTION),
+                 errmsg("previous edge: [id: %ld, start: %ld, end: %ld, label oid: %d]",
+                        ee->edge_id, ee->start_vertex_id, ee->end_vertex_id,
+                        ee->edge_label_table_oid)));
+
         return false;
     }
 
     /* not sure if we really need to zero out the entry, as we set everything */
-    MemSet(value, 0, sizeof(edge_entry));
+    MemSet(ee, 0, sizeof(edge_entry));
 
     /*
      * Set the edge id - this is important as this is the hash key value used
      * for hash function collisions.
      */
-    value->edge_id = edge_id;
-    value->edge_properties = edge_properties;
-    value->start_vertex_id = start_vertex_id;
-    value->end_vertex_id = end_vertex_id;
-    value->edge_label_table_oid = edge_label_table_oid;
+    ee->edge_id = edge_id;
+    ee->edge_properties = edge_properties;
+    ee->start_vertex_id = start_vertex_id;
+    ee->end_vertex_id = end_vertex_id;
+    ee->edge_label_table_oid = edge_label_table_oid;
+
+    /* we also need to store the edge id for clean up of edge property datums */
+    ggctx->edges = append_graphid(ggctx->edges, edge_id);
 
     /* increment the number of loaded edges */
     ggctx->num_loaded_edges++;
@@ -293,9 +326,26 @@ static bool insert_vertex_entry(GRAPH_global_context *ggctx, graphid vertex_id,
     ve = (vertex_entry *)hash_search(ggctx->vertex_hashtable,
                                      (void *)&vertex_id, HASH_ENTER, &found);
 
-    /* we should never have duplicates, return false */
+    /* if the hash enter returned is NULL, error out */
+    if (ve == NULL)
+    {
+        elog(ERROR, "insert_vertex_entry: hash table returned NULL for ve");
+    }
+
+    /* we should never have duplicates, warn and return false */
     if (found)
     {
+        ereport(WARNING,
+                (errcode(ERRCODE_DATA_EXCEPTION),
+                 errmsg("vertex: [id: %ld, label oid: %d] %s",
+                        vertex_id, vertex_label_table_oid,
+                        "duplicate vertex found")));
+
+        ereport(WARNING,
+                (errcode(ERRCODE_DATA_EXCEPTION),
+                 errmsg("previous vertex: [id: %ld, label oid: %d]",
+                        ve->vertex_id, ve->vertex_label_table_oid)));
+
         return false;
     }
 
@@ -331,10 +381,11 @@ static bool insert_vertex_entry(GRAPH_global_context *ggctx, graphid vertex_id,
  */
 static bool insert_vertex_edge(GRAPH_global_context *ggctx,
                                graphid start_vertex_id, graphid end_vertex_id,
-                               graphid edge_id)
+                               graphid edge_id, char *edge_label_name)
 {
     vertex_entry *value = NULL;
-    bool found = false;
+    bool start_found = false;
+    bool end_found = false;
     bool is_selfloop = false;
 
     /* is it a self loop */
@@ -343,39 +394,70 @@ static bool insert_vertex_edge(GRAPH_global_context *ggctx,
     /* search for the start vertex of the edge */
     value = (vertex_entry *)hash_search(ggctx->vertex_hashtable,
                                         (void *)&start_vertex_id, HASH_FIND,
-                                        &found);
-    /* vertices were preloaded so it must be there */
-    Assert(found);
-    if (!found)
-    {
-        return found;
-    }
+                                        &start_found);
 
-    /* if it is a self loop, add the edge to edges_self and we're done */
-    if (is_selfloop)
+    /*
+     * If we found the start_vertex_id and it is a self loop, add the edge to
+     * edges_self and we're done
+     */
+    if (start_found && is_selfloop)
     {
         value->edges_self = append_graphid(value->edges_self, edge_id);
-        return found;
+        return true;
     }
-
-    /* add the edge to the edges_out list of the start vertex */
-    value->edges_out = append_graphid(value->edges_out, edge_id);
+    /*
+     * Otherwise, if we found the start_vertex_id add the edge to the edges_out
+     * list of the start vertex
+     */
+    else if (start_found)
+    {
+        value->edges_out = append_graphid(value->edges_out, edge_id);
+    }
 
     /* search for the end vertex of the edge */
     value = (vertex_entry *)hash_search(ggctx->vertex_hashtable,
                                         (void *)&end_vertex_id, HASH_FIND,
-                                        &found);
-    /* vertices were preloaded so it must be there */
-    Assert(found);
-    if (!found)
+                                        &end_found);
+
+    /*
+     * If we found the start_vertex_id and the end_vertex_id add the edge to the
+     * edges_in list of the end vertex
+     */
+    if (start_found && end_found)
     {
-        return found;
+        value->edges_in = append_graphid(value->edges_in, edge_id);
+        return true;
+    }
+    /*
+     * Otherwise we need to generate the appropriate warning message about the
+     * dangling edge that we found.
+     */
+    else if (!start_found && end_found)
+    {
+        ereport(WARNING,
+                (errcode(ERRCODE_DATA_EXCEPTION),
+                 errmsg("edge: [id: %ld, start: %ld, end: %ld, label: %s] %s",
+                        edge_id, start_vertex_id, end_vertex_id,
+                        edge_label_name, "start vertex not found")));
+    }
+    else if (start_found && !end_found)
+    {
+        ereport(WARNING,
+                (errcode(ERRCODE_DATA_EXCEPTION),
+                 errmsg("edge: [id: %ld, start: %ld, end: %ld, label: %s] %s",
+                        edge_id, start_vertex_id, end_vertex_id,
+                        edge_label_name, "end vertex not found")));
+    }
+    else
+    {
+        ereport(WARNING,
+                (errcode(ERRCODE_DATA_EXCEPTION),
+                 errmsg("edge: [id: %ld, start: %ld, end: %ld, label: %s] %s",
+                        edge_id, start_vertex_id, end_vertex_id,
+                        edge_label_name, "start and end vertices not found")));
     }
 
-    /* add the edge to the edges_in list of the end vertex */
-    value->edges_in = append_graphid(value->edges_in, edge_id);
-
-    return found;
+    return false;
 }
 
 /* helper routine to load all vertices into the GRAPH global vertex hashtable */
@@ -399,7 +481,7 @@ static void load_vertex_hashtable(GRAPH_global_context *ggctx)
     foreach (lc, vertex_label_names)
     {
         Relation graph_vertex_label;
-        HeapScanDesc scan_desc;
+        TableScanDesc scan_desc;
         HeapTuple tuple;
         char *vertex_label_name;
         Oid vertex_label_table_oid;
@@ -411,8 +493,8 @@ static void load_vertex_hashtable(GRAPH_global_context *ggctx)
         vertex_label_table_oid = get_relname_relid(vertex_label_name,
                                                    graph_namespace_oid);
         /* open the relation (table) and begin the scan */
-        graph_vertex_label = heap_open(vertex_label_table_oid, ShareLock);
-        scan_desc = heap_beginscan(graph_vertex_label, snapshot, 0, NULL);
+        graph_vertex_label = table_open(vertex_label_table_oid, ShareLock);
+        scan_desc = table_beginscan(graph_vertex_label, snapshot, 0, NULL);
         /* get the tupdesc - we don't need to release this one */
         tupdesc = RelationGetDescr(graph_vertex_label);
         /* bail if the number of columns differs */
@@ -431,29 +513,38 @@ static void load_vertex_hashtable(GRAPH_global_context *ggctx)
             bool inserted = false;
 
             /* something is wrong if this isn't true */
+            if (!HeapTupleIsValid(tuple))
+            {
+                elog(ERROR, "load_vertex_hashtable: !HeapTupleIsValid");
+            }
             Assert(HeapTupleIsValid(tuple));
+
             /* get the vertex id */
             vertex_id = DatumGetInt64(column_get_datum(tupdesc, tuple, 0, "id",
                                                        GRAPHIDOID, true));
             /* get the vertex properties datum */
             vertex_properties = column_get_datum(tupdesc, tuple, 1,
                                                  "properties", AGTYPEOID, true);
+            /* we need to make a copy of the properties datum */
+            vertex_properties = datumCopy(vertex_properties, false, -1);
 
             /* insert vertex into vertex hashtable */
             inserted = insert_vertex_entry(ggctx, vertex_id,
                                            vertex_label_table_oid,
                                            vertex_properties);
 
-            /* this insert must not fail, it means there is a duplicate */
+            /* warn if there is a duplicate */
             if (!inserted)
             {
-                 elog(ERROR, "insert_vertex_entry: failed due to duplicate");
+                 ereport(WARNING,
+                         (errcode(ERRCODE_DATA_EXCEPTION),
+                          errmsg("ignored duplicate vertex")));
             }
         }
 
         /* end the scan and close the relation */
-        heap_endscan(scan_desc);
-        heap_close(graph_vertex_label, ShareLock);
+        table_endscan(scan_desc);
+        table_close(graph_vertex_label, ShareLock);
     }
 }
 
@@ -498,7 +589,7 @@ static void load_edge_hashtable(GRAPH_global_context *ggctx)
     foreach (lc, edge_label_names)
     {
         Relation graph_edge_label;
-        HeapScanDesc scan_desc;
+        TableScanDesc scan_desc;
         HeapTuple tuple;
         char *edge_label_name;
         Oid edge_label_table_oid;
@@ -510,8 +601,8 @@ static void load_edge_hashtable(GRAPH_global_context *ggctx)
         edge_label_table_oid = get_relname_relid(edge_label_name,
                                                  graph_namespace_oid);
         /* open the relation (table) and begin the scan */
-        graph_edge_label = heap_open(edge_label_table_oid, ShareLock);
-        scan_desc = heap_beginscan(graph_edge_label, snapshot, 0, NULL);
+        graph_edge_label = table_open(edge_label_table_oid, ShareLock);
+        scan_desc = table_beginscan(graph_edge_label, snapshot, 0, NULL);
         /* get the tupdesc - we don't need to release this one */
         tupdesc = RelationGetDescr(graph_edge_label);
         /* bail if the number of columns differs */
@@ -532,7 +623,12 @@ static void load_edge_hashtable(GRAPH_global_context *ggctx)
             bool inserted = false;
 
             /* something is wrong if this isn't true */
+            if (!HeapTupleIsValid(tuple))
+            {
+                elog(ERROR, "load_edge_hashtable: !HeapTupleIsValid");
+            }
             Assert(HeapTupleIsValid(tuple));
+
             /* get the edge id */
             edge_id = DatumGetInt64(column_get_datum(tupdesc, tuple, 0, "id",
                                                      GRAPHIDOID, true));
@@ -551,30 +647,38 @@ static void load_edge_hashtable(GRAPH_global_context *ggctx)
             edge_properties = column_get_datum(tupdesc, tuple, 3, "properties",
                                                AGTYPEOID, true);
 
-            /* insert edge into edge hashtable */
-            inserted = insert_edge(ggctx, edge_id, edge_properties,
-                                   edge_vertex_start_id, edge_vertex_end_id,
-                                   edge_label_table_oid);
+            /* we need to make a copy of the properties datum */
+            edge_properties = datumCopy(edge_properties, false, -1);
 
-            /* this insert must not fail */
+            /* insert edge into edge hashtable */
+            inserted = insert_edge_entry(ggctx, edge_id, edge_properties,
+                                         edge_vertex_start_id,
+                                         edge_vertex_end_id,
+                                         edge_label_table_oid);
+
+            /* warn if there is a duplicate */
             if (!inserted)
             {
-                 elog(ERROR, "insert_edge: failed to insert");
+                 ereport(WARNING,
+                         (errcode(ERRCODE_DATA_EXCEPTION),
+                          errmsg("ignored duplicate edge")));
             }
 
             /* insert the edge into the start and end vertices edge lists */
             inserted = insert_vertex_edge(ggctx, edge_vertex_start_id,
-                                          edge_vertex_end_id, edge_id);
-            /* this insert must not fail */
+                                          edge_vertex_end_id, edge_id,
+                                          edge_label_name);
             if (!inserted)
             {
-                 elog(ERROR, "insert_vertex_edge: failed to insert");
+                 ereport(WARNING,
+                         (errcode(ERRCODE_DATA_EXCEPTION),
+                          errmsg("ignored malformed or dangling edge")));
             }
         }
 
         /* end the scan and close the relation */
-        heap_endscan(scan_desc);
-        heap_close(graph_edge_label, ShareLock);
+        table_endscan(scan_desc);
+        table_close(graph_edge_label, ShareLock);
     }
 }
 
@@ -593,24 +697,25 @@ static void freeze_GRAPH_global_hashtables(GRAPH_global_context *ggctx)
  * Helper function to free the entire specified GRAPH global context. After
  * running this you should not use the pointer in ggctx.
  */
-static void free_specific_GRAPH_global_context(GRAPH_global_context *ggctx)
+static bool free_specific_GRAPH_global_context(GRAPH_global_context *ggctx)
 {
     GraphIdNode *curr_vertex = NULL;
+    GraphIdNode *curr_edge = NULL;
 
     /* don't do anything if NULL */
     if (ggctx == NULL)
     {
-        return;
+        return true;
     }
 
     /* free the graph name */
-    pfree(ggctx->graph_name);
+    pfree_if_not_null(ggctx->graph_name);
     ggctx->graph_name = NULL;
 
     ggctx->graph_oid = InvalidOid;
     ggctx->next = NULL;
 
-    /* free the vertex edge lists, starting with the head */
+    /* free the vertex edge lists and properties, starting with the head */
     curr_vertex = peek_stack_head(ggctx->vertices);
     while (curr_vertex != NULL)
     {
@@ -629,8 +734,15 @@ static void free_specific_GRAPH_global_context(GRAPH_global_context *ggctx)
         value = (vertex_entry *)hash_search(ggctx->vertex_hashtable,
                                             (void *)&vertex_id, HASH_FIND,
                                             &found);
-        /* this is bad if it isn't found */
-        Assert(found);
+        /* this is bad if it isn't found, but leave that to the caller */
+        if (found == false)
+        {
+            return false;
+        }
+
+        /* free the vertex's datumCopy properties */
+        pfree_if_not_null(DatumGetPointer(value->vertex_properties));
+        value->vertex_properties = 0;
 
         /* free the edge list associated with this vertex */
         free_ListGraphId(value->edges_in);
@@ -645,9 +757,46 @@ static void free_specific_GRAPH_global_context(GRAPH_global_context *ggctx)
         curr_vertex = next_vertex;
     }
 
+    /* free the edge properties, starting with the head */
+    curr_edge = peek_stack_head(ggctx->edges);
+    while (curr_edge != NULL)
+    {
+        GraphIdNode *next_edge = NULL;
+        edge_entry *value = NULL;
+        bool found = false;
+        graphid edge_id;
+
+        /* get the next edge in the list, if any */
+        next_edge = next_GraphIdNode(curr_edge);
+
+        /* get the current edge id */
+        edge_id = get_graphid(curr_edge);
+
+        /* retrieve the edge entry */
+        value = (edge_entry *)hash_search(ggctx->edge_hashtable,
+                                          (void *)&edge_id, HASH_FIND,
+                                          &found);
+        /* this is bad if it isn't found, but leave that to the caller */
+        if (found == false)
+        {
+            return false;
+        }
+
+        /* free the edge's datumCopy properties */
+        pfree_if_not_null(DatumGetPointer(value->edge_properties));
+        value->edge_properties = 0;
+
+        /* move to the next edge */
+        curr_edge = next_edge;
+    }
+
     /* free the vertices list */
     free_ListGraphId(ggctx->vertices);
     ggctx->vertices = NULL;
+
+    /* free the edges list */
+    free_ListGraphId(ggctx->edges);
+    ggctx->edges = NULL;
 
     /* free the hashtables */
     hash_destroy(ggctx->vertex_hashtable);
@@ -657,8 +806,10 @@ static void free_specific_GRAPH_global_context(GRAPH_global_context *ggctx)
     ggctx->edge_hashtable = NULL;
 
     /* free the context */
-    pfree(ggctx);
+    pfree_if_not_null(ggctx);
     ggctx = NULL;
+
+    return true;
 }
 
 /*
@@ -666,6 +817,9 @@ static void free_specific_GRAPH_global_context(GRAPH_global_context *ggctx)
  * context for the graph specified, provided it isn't already built and valid.
  * During processing it will free (delete) all invalid GRAPH contexts. It
  * returns the GRAPH global context for the specified graph.
+ *
+ * NOTE: Function uses a MUTEX for global_graph_contexts
+ *
  */
 GRAPH_global_context *manage_GRAPH_global_contexts(char *graph_name,
                                                    Oid graph_oid)
@@ -689,9 +843,12 @@ GRAPH_global_context *manage_GRAPH_global_contexts(char *graph_name,
      *     5) One or more other contexts do exist but, one or more are invalid.
      */
 
+    /* lock the global contexts list */
+    pthread_mutex_lock(&global_graph_contexts_container.mutex_lock);
+
     /* free the invalidated GRAPH global contexts first */
     prev_ggctx = NULL;
-    curr_ggctx = global_graph_contexts;
+    curr_ggctx = global_graph_contexts_container.contexts;
     while (curr_ggctx != NULL)
     {
         GRAPH_global_context *next_ggctx = curr_ggctx->next;
@@ -699,14 +856,16 @@ GRAPH_global_context *manage_GRAPH_global_contexts(char *graph_name,
         /* if the transaction ids have changed, we have an invalid graph */
         if (is_ggctx_invalid(curr_ggctx))
         {
+            bool success = false;
+
             /*
              * If prev_ggctx is NULL then we are freeing the top of the
-             * contexts. So, we need to point the global variable to the
+             * contexts. So, we need to point the contexts variable to the
              * new (next) top context, if there is one.
              */
             if (prev_ggctx == NULL)
             {
-                global_graph_contexts = next_ggctx;
+                global_graph_contexts_container.contexts = next_ggctx;
             }
             else
             {
@@ -714,7 +873,17 @@ GRAPH_global_context *manage_GRAPH_global_contexts(char *graph_name,
             }
 
             /* free the current graph context */
-            free_specific_GRAPH_global_context(curr_ggctx);
+            success = free_specific_GRAPH_global_context(curr_ggctx);
+
+            /* if it wasn't successfull, there was a missing vertex entry */
+            if (!success)
+            {
+                /* unlock the mutex so we don't get a deadlock */
+                pthread_mutex_unlock(&global_graph_contexts_container.mutex_lock);
+
+                ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION),
+                                errmsg("missing vertex or edge entry during free")));
+            }
         }
         else
         {
@@ -726,14 +895,17 @@ GRAPH_global_context *manage_GRAPH_global_contexts(char *graph_name,
     }
 
     /* find our graph's context. if it exists, we are done */
-    curr_ggctx = global_graph_contexts;
+    curr_ggctx = global_graph_contexts_container.contexts;
     while (curr_ggctx != NULL)
     {
         if (curr_ggctx->graph_oid == graph_oid)
         {
             /* switch our context back */
             MemoryContextSwitchTo(oldctx);
-            /* we are done */
+
+            /* we are done unlock the global contexts list */
+            pthread_mutex_unlock(&global_graph_contexts_container.mutex_lock);
+
             return curr_ggctx;
         }
         curr_ggctx = curr_ggctx->next;
@@ -742,9 +914,9 @@ GRAPH_global_context *manage_GRAPH_global_contexts(char *graph_name,
     /* otherwise, we need to create one and possibly attach it */
     new_ggctx = palloc0(sizeof(GRAPH_global_context));
 
-    if (global_graph_contexts != NULL)
+    if (global_graph_contexts_container.contexts != NULL)
     {
-        new_ggctx->next = global_graph_contexts;
+        new_ggctx->next = global_graph_contexts_container.contexts;
     }
     else
     {
@@ -752,7 +924,7 @@ GRAPH_global_context *manage_GRAPH_global_contexts(char *graph_name,
     }
 
     /* set the global context variable */
-    global_graph_contexts = new_ggctx;
+    global_graph_contexts_container.contexts = new_ggctx;
 
     /* set the graph name and oid */
     new_ggctx->graph_name = pstrdup(graph_name);
@@ -765,11 +937,16 @@ GRAPH_global_context *manage_GRAPH_global_contexts(char *graph_name,
 
     /* initialize our vertices list */
     new_ggctx->vertices = NULL;
+    /* initialize our edges list */
+    new_ggctx->edges = NULL;
 
     /* build the hashtables for this graph */
     create_GRAPH_global_hashtables(new_ggctx);
     load_GRAPH_global_hashtables(new_ggctx);
     freeze_GRAPH_global_hashtables(new_ggctx);
+
+    /* unlock the global contexts list */
+    pthread_mutex_unlock(&global_graph_contexts_container.mutex_lock);
 
     /* switch back to the previous memory context */
     MemoryContextSwitchTo(oldctx);
@@ -780,22 +957,38 @@ GRAPH_global_context *manage_GRAPH_global_contexts(char *graph_name,
 /*
  * Helper function to delete all of the global graph contexts used by the
  * process. When done the global global_graph_contexts will be NULL.
+ *
+ * NOTE: Function uses a MUTEX global_graph_contexts_mutex
  */
 static bool delete_GRAPH_global_contexts(void)
 {
     GRAPH_global_context *curr_ggctx = NULL;
     bool retval = false;
 
+    /* lock contexts list */
+    pthread_mutex_lock(&global_graph_contexts_container.mutex_lock);
+
     /* get the first context, if any */
-    curr_ggctx = global_graph_contexts;
+    curr_ggctx = global_graph_contexts_container.contexts;
 
     /* free all GRAPH global contexts */
     while (curr_ggctx != NULL)
     {
         GRAPH_global_context *next_ggctx = curr_ggctx->next;
+        bool success = false;
 
         /* free the current graph context */
-        free_specific_GRAPH_global_context(curr_ggctx);
+        success = free_specific_GRAPH_global_context(curr_ggctx);
+
+        /* if it wasn't successfull, there was a missing vertex entry */
+        if (!success)
+        {
+            /* unlock the mutex so we don't get a deadlock */
+            pthread_mutex_unlock(&global_graph_contexts_container.mutex_lock);
+
+            ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION),
+                            errmsg("missing vertex or edge entry during free")));
+        }
 
         /* advance to the next context */
         curr_ggctx = next_ggctx;
@@ -803,8 +996,11 @@ static bool delete_GRAPH_global_contexts(void)
         retval = true;
     }
 
-    /* clear the global variable */
-    global_graph_contexts = NULL;
+    /* reset the head of the contexts to NULL */
+    global_graph_contexts_container.contexts = NULL;
+
+    /* unlock the global contexts list */
+    pthread_mutex_unlock(&global_graph_contexts_container.mutex_lock);
 
     return retval;
 }
@@ -827,8 +1023,11 @@ static bool delete_specific_GRAPH_global_contexts(char *graph_name)
     /* get the graph oid */
     graph_oid = get_graph_oid(graph_name);
 
+    /* lock the global contexts list */
+    pthread_mutex_lock(&global_graph_contexts_container.mutex_lock);
+
     /* get the first context, if any */
-    curr_ggctx = global_graph_contexts;
+    curr_ggctx = global_graph_contexts_container.contexts;
 
     /* find the specified GRAPH global context */
     while (curr_ggctx != NULL)
@@ -837,6 +1036,7 @@ static bool delete_specific_GRAPH_global_contexts(char *graph_name)
 
         if (curr_ggctx->graph_oid == graph_oid)
         {
+            bool success = false;
             /*
              * If prev_ggctx is NULL then we are freeing the top of the
              * contexts. So, we need to point the global variable to the
@@ -844,7 +1044,7 @@ static bool delete_specific_GRAPH_global_contexts(char *graph_name)
              */
             if (prev_ggctx == NULL)
             {
-                global_graph_contexts = next_ggctx;
+                global_graph_contexts_container.contexts = next_ggctx;
             }
             else
             {
@@ -852,7 +1052,17 @@ static bool delete_specific_GRAPH_global_contexts(char *graph_name)
             }
 
             /* free the current graph context */
-            free_specific_GRAPH_global_context(curr_ggctx);
+            success = free_specific_GRAPH_global_context(curr_ggctx);
+
+            /* unlock the global contexts list */
+            pthread_mutex_unlock(&global_graph_contexts_container.mutex_lock);
+
+            /* if it wasn't successfull, there was a missing vertex entry */
+            if (!success)
+            {
+                ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION),
+                                errmsg("missing vertex_entry during free")));
+            }
 
             /* we found and freed it, return true */
             return true;
@@ -862,6 +1072,9 @@ static bool delete_specific_GRAPH_global_contexts(char *graph_name)
         prev_ggctx = curr_ggctx;
         curr_ggctx = next_ggctx;
     }
+
+    /* unlock the global contexts list */
+    pthread_mutex_unlock(&global_graph_contexts_container.mutex_lock);
 
     /* we didn't find it, return false */
     return false;
@@ -906,20 +1119,29 @@ GRAPH_global_context *find_GRAPH_global_context(Oid graph_oid)
 {
     GRAPH_global_context *ggctx = NULL;
 
+    /* lock the global contexts lists */
+    pthread_mutex_lock(&global_graph_contexts_container.mutex_lock);
+
     /* get the root */
-    ggctx = global_graph_contexts;
+    ggctx = global_graph_contexts_container.contexts;
 
     while(ggctx != NULL)
     {
         /* if we found it return it */
         if (ggctx->graph_oid == graph_oid)
         {
+            /* unlock the global contexts lists */
+            pthread_mutex_unlock(&global_graph_contexts_container.mutex_lock);
+
             return ggctx;
         }
 
         /* advance to the next context */
         ggctx = ggctx->next;
     }
+
+    /* unlock the global contexts lists */
+    pthread_mutex_unlock(&global_graph_contexts_container.mutex_lock);
 
     /* we did not find it so return NULL */
     return NULL;
@@ -1015,8 +1237,12 @@ Datum age_delete_global_graphs(PG_FUNCTION_ARGS)
     {
         char *graph_name = NULL;
 
-        graph_name = agtv_temp->val.string.val;
+        graph_name = strndup(agtv_temp->val.string.val,
+                             agtv_temp->val.string.len);
+
         success = delete_specific_GRAPH_global_contexts(graph_name);
+
+        free(graph_name);
     }
     else
     {
@@ -1083,7 +1309,7 @@ Datum age_vertex_stats(PG_FUNCTION_ARGS)
     ggctx = manage_GRAPH_global_contexts(graph_name, graph_oid);
 
     /* free the graph name */
-    pfree(graph_name);
+    pfree_if_not_null(graph_name);
 
     /* get the id */
     agtv_temp = GET_AGTYPE_VALUE_OBJECT_VALUE(agtv_vertex, "id");
@@ -1136,6 +1362,87 @@ Datum age_vertex_stats(PG_FUNCTION_ARGS)
     agtv_temp->val.int_value = degree + self_loops;
     result.res = push_agtype_value(&result.parse_state, WAGT_KEY,
                                    string_to_agtype_value("out_degree"));
+    result.res = push_agtype_value(&result.parse_state, WAGT_VALUE, agtv_temp);
+
+    /* close the object */
+    result.res = push_agtype_value(&result.parse_state, WAGT_END_OBJECT, NULL);
+
+    result.res->type = AGTV_OBJECT;
+
+    PG_RETURN_POINTER(agtype_value_to_agtype(result.res));
+}
+
+/* PG wrapper function for age_graph_stats */
+PG_FUNCTION_INFO_V1(age_graph_stats);
+
+Datum age_graph_stats(PG_FUNCTION_ARGS)
+{
+    GRAPH_global_context *ggctx = NULL;
+    agtype_value *agtv_temp = NULL;
+    agtype_value agtv_integer;
+    agtype_in_state result;
+    char *graph_name = NULL;
+    Oid graph_oid = InvalidOid;
+
+    /* the graph name is required, but this generally isn't user supplied */
+    if (PG_ARGISNULL(0))
+    {
+        ereport(ERROR,
+                (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                 errmsg("graph_stats: graph name cannot be NULL")));
+    }
+
+    /* get the graph name */
+    agtv_temp = get_agtype_value("graph_stats", AG_GET_ARG_AGTYPE_P(0),
+                                 AGTV_STRING, true);
+
+    graph_name = pnstrdup(agtv_temp->val.string.val,
+                          agtv_temp->val.string.len);
+
+    /*
+     * Remove any context for this graph. This is done to allow graph_stats to
+     * show any load issues.
+     */
+    delete_specific_GRAPH_global_contexts(graph_name);
+
+    /* get the graph oid */
+    graph_oid = get_graph_oid(graph_name);
+
+    /*
+     * Create or retrieve the GRAPH global context for this graph. This function
+     * will also purge off invalidated contexts.
+     */
+    ggctx = manage_GRAPH_global_contexts(graph_name, graph_oid);
+
+    /* free the graph name */
+    pfree_if_not_null(graph_name);
+
+    /* zero the state */
+    memset(&result, 0, sizeof(agtype_in_state));
+
+    /* start the object */
+    result.res = push_agtype_value(&result.parse_state, WAGT_BEGIN_OBJECT,
+                                   NULL);
+    /* store the graph name */
+    result.res = push_agtype_value(&result.parse_state, WAGT_KEY,
+                                   string_to_agtype_value("graph"));
+    result.res = push_agtype_value(&result.parse_state, WAGT_VALUE, agtv_temp);
+
+    /* set up an integer for returning values */
+    agtv_temp = &agtv_integer;
+    agtv_temp->type = AGTV_INTEGER;
+    agtv_temp->val.int_value = 0;
+
+    /* get and store num_loaded_vertices */
+    agtv_temp->val.int_value = ggctx->num_loaded_vertices;
+    result.res = push_agtype_value(&result.parse_state, WAGT_KEY,
+                                   string_to_agtype_value("num_loaded_vertices"));
+    result.res = push_agtype_value(&result.parse_state, WAGT_VALUE, agtv_temp);
+
+    /* get and store num_loaded_edges */
+    agtv_temp->val.int_value = ggctx->num_loaded_edges;
+    result.res = push_agtype_value(&result.parse_state, WAGT_KEY,
+                                   string_to_agtype_value("num_loaded_edges"));
     result.res = push_agtype_value(&result.parse_state, WAGT_VALUE, agtv_temp);
 
     /* close the object */

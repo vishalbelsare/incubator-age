@@ -19,7 +19,6 @@
 
 #include "postgres.h"
 
-#include "fmgr.h"
 #include "utils/builtins.h"
 #include "utils/sortsupport.h"
 
@@ -36,7 +35,8 @@ Oid get_GRAPHIDOID(void)
 {
     if (g_GRAPHIDOID == InvalidOid)
     {
-        g_GRAPHIDOID = GetSysCacheOid2(TYPENAMENSP, CStringGetDatum("graphid"),
+        g_GRAPHIDOID = GetSysCacheOid2(TYPENAMENSP, Anum_pg_type_oid,
+                                       CStringGetDatum("graphid"),
                                        ObjectIdGetDatum(ag_catalog_namespace_id()));
     }
 
@@ -48,7 +48,7 @@ Oid get_GRAPHIDARRAYOID(void)
 {
     if (g_GRAPHIDARRAYOID == InvalidOid)
     {
-        g_GRAPHIDARRAYOID = GetSysCacheOid2(TYPENAMENSP,
+        g_GRAPHIDARRAYOID = GetSysCacheOid2(TYPENAMENSP, Anum_pg_type_oid,
                                             CStringGetDatum("_graphid"),
                                             ObjectIdGetDatum(ag_catalog_namespace_id()));
     }
@@ -65,7 +65,7 @@ void clear_global_Oids_GRAPHID(void)
 
 PG_FUNCTION_INFO_V1(graphid_in);
 
-// graphid type input function
+/* graphid type input function */
 Datum graphid_in(PG_FUNCTION_ARGS)
 {
     char *str = PG_GETARG_CSTRING(0);
@@ -86,11 +86,11 @@ Datum graphid_in(PG_FUNCTION_ARGS)
 
 PG_FUNCTION_INFO_V1(graphid_out);
 
-// graphid type output function
+/* graphid type output function */
 Datum graphid_out(PG_FUNCTION_ARGS)
 {
     graphid gid = AG_GETARG_GRAPHID(0);
-    char buf[32]; // greater than MAXINT8LEN+1
+    char buf[32]; /* greater than MAXINT8LEN+1 */
     char *out;
 
     pg_lltoa(gid, buf);
@@ -252,13 +252,13 @@ Datum _graphid(PG_FUNCTION_ARGS)
     AG_RETURN_GRAPHID(gid);
 }
 
-//Hashing Function for Hash Indexes
+/* Hashing Function for Hash Indexes */
 PG_FUNCTION_INFO_V1(graphid_hash_cmp);
 
 Datum graphid_hash_cmp(PG_FUNCTION_ARGS)
 {
     graphid l = AG_GETARG_GRAPHID(0);
-    int hash = (int) ((l >> 32) ^ l);// ^ seed;
+    int hash = (int) ((l >> 32) ^ l);/* ^ seed; */
 
     PG_RETURN_INT32(hash);
 }

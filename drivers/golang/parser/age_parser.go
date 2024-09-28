@@ -1,115 +1,117 @@
-/*
- * Licensed to the Apache Software Foundation (ASF) under one
- * or more contributor license agreements.  See the NOTICE file
- * distributed with this work for additional information
- * regarding copyright ownership.  The ASF licenses this file
- * to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance
- * with the License.  You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
-// Code generated from Age.g4 by ANTLR 4.9.2. DO NOT EDIT.
+// Code generated from java-escape by ANTLR 4.11.1. DO NOT EDIT.
 
 package parser // Age
 
 import (
 	"fmt"
-	"reflect"
 	"strconv"
+	"sync"
 
-	"github.com/antlr/antlr4/runtime/Go/antlr"
+	"github.com/antlr/antlr4/runtime/Go/antlr/v4"
 )
 
 // Suppress unused import errors
 var _ = fmt.Printf
-var _ = reflect.Copy
 var _ = strconv.Itoa
-
-var parserATN = []uint16{
-	3, 24715, 42794, 33075, 47597, 16764, 15335, 30598, 22884, 3, 19, 90, 4,
-	2, 9, 2, 4, 3, 9, 3, 4, 4, 9, 4, 4, 5, 9, 5, 4, 6, 9, 6, 4, 7, 9, 7, 4,
-	8, 9, 8, 4, 9, 9, 9, 3, 2, 3, 2, 3, 2, 3, 2, 5, 2, 23, 10, 2, 3, 3, 3,
-	3, 3, 3, 3, 4, 3, 4, 3, 4, 3, 5, 3, 5, 3, 5, 3, 5, 3, 5, 3, 5, 3, 5, 7,
-	5, 38, 10, 5, 12, 5, 14, 5, 41, 11, 5, 3, 5, 3, 5, 3, 5, 3, 6, 3, 6, 3,
-	6, 3, 6, 3, 6, 3, 6, 3, 6, 3, 6, 5, 6, 54, 10, 6, 3, 7, 3, 7, 3, 7, 3,
-	7, 7, 7, 60, 10, 7, 12, 7, 14, 7, 63, 11, 7, 3, 7, 3, 7, 3, 7, 3, 7, 5,
-	7, 69, 10, 7, 3, 8, 3, 8, 3, 8, 3, 8, 3, 9, 3, 9, 3, 9, 3, 9, 7, 9, 79,
-	10, 9, 12, 9, 14, 9, 82, 11, 9, 3, 9, 3, 9, 3, 9, 3, 9, 5, 9, 88, 10, 9,
-	3, 9, 2, 2, 10, 2, 4, 6, 8, 10, 12, 14, 16, 2, 2, 2, 96, 2, 22, 3, 2, 2,
-	2, 4, 24, 3, 2, 2, 2, 6, 27, 3, 2, 2, 2, 8, 30, 3, 2, 2, 2, 10, 53, 3,
-	2, 2, 2, 12, 68, 3, 2, 2, 2, 14, 70, 3, 2, 2, 2, 16, 87, 3, 2, 2, 2, 18,
-	23, 5, 10, 6, 2, 19, 23, 5, 4, 3, 2, 20, 23, 5, 6, 4, 2, 21, 23, 5, 8,
-	5, 2, 22, 18, 3, 2, 2, 2, 22, 19, 3, 2, 2, 2, 22, 20, 3, 2, 2, 2, 22, 21,
-	3, 2, 2, 2, 23, 3, 3, 2, 2, 2, 24, 25, 5, 12, 7, 2, 25, 26, 7, 9, 2, 2,
-	26, 5, 3, 2, 2, 2, 27, 28, 5, 12, 7, 2, 28, 29, 7, 10, 2, 2, 29, 7, 3,
-	2, 2, 2, 30, 31, 7, 3, 2, 2, 31, 39, 5, 4, 3, 2, 32, 33, 7, 4, 2, 2, 33,
-	34, 5, 6, 4, 2, 34, 35, 7, 4, 2, 2, 35, 36, 5, 4, 3, 2, 36, 38, 3, 2, 2,
-	2, 37, 32, 3, 2, 2, 2, 38, 41, 3, 2, 2, 2, 39, 37, 3, 2, 2, 2, 39, 40,
-	3, 2, 2, 2, 40, 42, 3, 2, 2, 2, 41, 39, 3, 2, 2, 2, 42, 43, 7, 5, 2, 2,
-	43, 44, 7, 11, 2, 2, 44, 9, 3, 2, 2, 2, 45, 54, 7, 13, 2, 2, 46, 54, 7,
-	16, 2, 2, 47, 54, 7, 18, 2, 2, 48, 54, 7, 17, 2, 2, 49, 54, 7, 14, 2, 2,
-	50, 54, 7, 15, 2, 2, 51, 54, 5, 12, 7, 2, 52, 54, 5, 16, 9, 2, 53, 45,
-	3, 2, 2, 2, 53, 46, 3, 2, 2, 2, 53, 47, 3, 2, 2, 2, 53, 48, 3, 2, 2, 2,
-	53, 49, 3, 2, 2, 2, 53, 50, 3, 2, 2, 2, 53, 51, 3, 2, 2, 2, 53, 52, 3,
-	2, 2, 2, 54, 11, 3, 2, 2, 2, 55, 56, 7, 6, 2, 2, 56, 61, 5, 14, 8, 2, 57,
-	58, 7, 4, 2, 2, 58, 60, 5, 14, 8, 2, 59, 57, 3, 2, 2, 2, 60, 63, 3, 2,
-	2, 2, 61, 59, 3, 2, 2, 2, 61, 62, 3, 2, 2, 2, 62, 64, 3, 2, 2, 2, 63, 61,
-	3, 2, 2, 2, 64, 65, 7, 7, 2, 2, 65, 69, 3, 2, 2, 2, 66, 67, 7, 6, 2, 2,
-	67, 69, 7, 7, 2, 2, 68, 55, 3, 2, 2, 2, 68, 66, 3, 2, 2, 2, 69, 13, 3,
-	2, 2, 2, 70, 71, 7, 13, 2, 2, 71, 72, 7, 8, 2, 2, 72, 73, 5, 10, 6, 2,
-	73, 15, 3, 2, 2, 2, 74, 75, 7, 3, 2, 2, 75, 80, 5, 10, 6, 2, 76, 77, 7,
-	4, 2, 2, 77, 79, 5, 10, 6, 2, 78, 76, 3, 2, 2, 2, 79, 82, 3, 2, 2, 2, 80,
-	78, 3, 2, 2, 2, 80, 81, 3, 2, 2, 2, 81, 83, 3, 2, 2, 2, 82, 80, 3, 2, 2,
-	2, 83, 84, 7, 5, 2, 2, 84, 88, 3, 2, 2, 2, 85, 86, 7, 3, 2, 2, 86, 88,
-	7, 5, 2, 2, 87, 74, 3, 2, 2, 2, 87, 85, 3, 2, 2, 2, 88, 17, 3, 2, 2, 2,
-	9, 22, 39, 53, 61, 68, 80, 87,
-}
-var literalNames = []string{
-	"", "'['", "','", "']'", "'{'", "'}'", "':'", "'::vertex'", "'::edge'",
-	"'::path'", "'::numeric'", "", "", "'null'",
-}
-var symbolicNames = []string{
-	"", "", "", "", "", "", "", "KW_VERTEX", "KW_EDGE", "KW_PATH", "KW_NUMERIC",
-	"STRING", "BOOL", "NULL", "NUMBER", "FLOAT_EXPR", "NUMERIC", "WS",
-}
-
-var ruleNames = []string{
-	"ageout", "vertex", "edge", "path", "value", "properties", "pair", "arr",
-}
+var _ = sync.Once{}
 
 type AgeParser struct {
 	*antlr.BaseParser
 }
 
-// NewAgeParser produces a new parser instance for the optional input antlr.TokenStream.
-//
-// The *AgeParser instance produced may be reused by calling the SetInputStream method.
-// The initial parser configuration is expensive to construct, and the object is not thread-safe;
-// however, if used within a Golang sync.Pool, the construction cost amortizes well and the
-// objects can be used in a thread-safe manner.
-func NewAgeParser(input antlr.TokenStream) *AgeParser {
-	this := new(AgeParser)
-	deserializer := antlr.NewATNDeserializer(nil)
-	deserializedATN := deserializer.DeserializeFromUInt16(parserATN)
-	decisionToDFA := make([]*antlr.DFA, len(deserializedATN.DecisionToState))
-	for index, ds := range deserializedATN.DecisionToState {
-		decisionToDFA[index] = antlr.NewDFA(ds, index)
-	}
-	this.BaseParser = antlr.NewBaseParser(input)
+var ageParserStaticData struct {
+	once                   sync.Once
+	serializedATN          []int32
+	literalNames           []string
+	symbolicNames          []string
+	ruleNames              []string
+	predictionContextCache *antlr.PredictionContextCache
+	atn                    *antlr.ATN
+	decisionToDFA          []*antlr.DFA
+}
 
-	this.Interpreter = antlr.NewParserATNSimulator(this, deserializedATN, decisionToDFA, antlr.NewPredictionContextCache())
-	this.RuleNames = ruleNames
-	this.LiteralNames = literalNames
-	this.SymbolicNames = symbolicNames
-	this.GrammarFileName = "Age.g4"
+func ageParserInit() {
+	staticData := &ageParserStaticData
+	staticData.literalNames = []string{
+		"", "'['", "','", "']'", "'{'", "'}'", "':'", "'::vertex'", "'::edge'",
+		"'::path'", "'::numeric'", "", "", "'null'",
+	}
+	staticData.symbolicNames = []string{
+		"", "", "", "", "", "", "", "KW_VERTEX", "KW_EDGE", "KW_PATH", "KW_NUMERIC",
+		"STRING", "BOOL", "NULL", "NUMBER", "FLOAT_EXPR", "NUMERIC", "WS",
+	}
+	staticData.ruleNames = []string{
+		"ageout", "vertex", "edge", "path", "value", "properties", "pair", "arr",
+	}
+	staticData.predictionContextCache = antlr.NewPredictionContextCache()
+	staticData.serializedATN = []int32{
+		4, 1, 17, 88, 2, 0, 7, 0, 2, 1, 7, 1, 2, 2, 7, 2, 2, 3, 7, 3, 2, 4, 7,
+		4, 2, 5, 7, 5, 2, 6, 7, 6, 2, 7, 7, 7, 1, 0, 1, 0, 1, 0, 1, 0, 3, 0, 21,
+		8, 0, 1, 1, 1, 1, 1, 1, 1, 2, 1, 2, 1, 2, 1, 3, 1, 3, 1, 3, 1, 3, 1, 3,
+		1, 3, 1, 3, 5, 3, 36, 8, 3, 10, 3, 12, 3, 39, 9, 3, 1, 3, 1, 3, 1, 3, 1,
+		4, 1, 4, 1, 4, 1, 4, 1, 4, 1, 4, 1, 4, 1, 4, 3, 4, 52, 8, 4, 1, 5, 1, 5,
+		1, 5, 1, 5, 5, 5, 58, 8, 5, 10, 5, 12, 5, 61, 9, 5, 1, 5, 1, 5, 1, 5, 1,
+		5, 3, 5, 67, 8, 5, 1, 6, 1, 6, 1, 6, 1, 6, 1, 7, 1, 7, 1, 7, 1, 7, 5, 7,
+		77, 8, 7, 10, 7, 12, 7, 80, 9, 7, 1, 7, 1, 7, 1, 7, 1, 7, 3, 7, 86, 8,
+		7, 1, 7, 0, 0, 8, 0, 2, 4, 6, 8, 10, 12, 14, 0, 0, 94, 0, 20, 1, 0, 0,
+		0, 2, 22, 1, 0, 0, 0, 4, 25, 1, 0, 0, 0, 6, 28, 1, 0, 0, 0, 8, 51, 1, 0,
+		0, 0, 10, 66, 1, 0, 0, 0, 12, 68, 1, 0, 0, 0, 14, 85, 1, 0, 0, 0, 16, 21,
+		3, 8, 4, 0, 17, 21, 3, 2, 1, 0, 18, 21, 3, 4, 2, 0, 19, 21, 3, 6, 3, 0,
+		20, 16, 1, 0, 0, 0, 20, 17, 1, 0, 0, 0, 20, 18, 1, 0, 0, 0, 20, 19, 1,
+		0, 0, 0, 21, 1, 1, 0, 0, 0, 22, 23, 3, 10, 5, 0, 23, 24, 5, 7, 0, 0, 24,
+		3, 1, 0, 0, 0, 25, 26, 3, 10, 5, 0, 26, 27, 5, 8, 0, 0, 27, 5, 1, 0, 0,
+		0, 28, 29, 5, 1, 0, 0, 29, 37, 3, 2, 1, 0, 30, 31, 5, 2, 0, 0, 31, 32,
+		3, 4, 2, 0, 32, 33, 5, 2, 0, 0, 33, 34, 3, 2, 1, 0, 34, 36, 1, 0, 0, 0,
+		35, 30, 1, 0, 0, 0, 36, 39, 1, 0, 0, 0, 37, 35, 1, 0, 0, 0, 37, 38, 1,
+		0, 0, 0, 38, 40, 1, 0, 0, 0, 39, 37, 1, 0, 0, 0, 40, 41, 5, 3, 0, 0, 41,
+		42, 5, 9, 0, 0, 42, 7, 1, 0, 0, 0, 43, 52, 5, 11, 0, 0, 44, 52, 5, 14,
+		0, 0, 45, 52, 5, 16, 0, 0, 46, 52, 5, 15, 0, 0, 47, 52, 5, 12, 0, 0, 48,
+		52, 5, 13, 0, 0, 49, 52, 3, 10, 5, 0, 50, 52, 3, 14, 7, 0, 51, 43, 1, 0,
+		0, 0, 51, 44, 1, 0, 0, 0, 51, 45, 1, 0, 0, 0, 51, 46, 1, 0, 0, 0, 51, 47,
+		1, 0, 0, 0, 51, 48, 1, 0, 0, 0, 51, 49, 1, 0, 0, 0, 51, 50, 1, 0, 0, 0,
+		52, 9, 1, 0, 0, 0, 53, 54, 5, 4, 0, 0, 54, 59, 3, 12, 6, 0, 55, 56, 5,
+		2, 0, 0, 56, 58, 3, 12, 6, 0, 57, 55, 1, 0, 0, 0, 58, 61, 1, 0, 0, 0, 59,
+		57, 1, 0, 0, 0, 59, 60, 1, 0, 0, 0, 60, 62, 1, 0, 0, 0, 61, 59, 1, 0, 0,
+		0, 62, 63, 5, 5, 0, 0, 63, 67, 1, 0, 0, 0, 64, 65, 5, 4, 0, 0, 65, 67,
+		5, 5, 0, 0, 66, 53, 1, 0, 0, 0, 66, 64, 1, 0, 0, 0, 67, 11, 1, 0, 0, 0,
+		68, 69, 5, 11, 0, 0, 69, 70, 5, 6, 0, 0, 70, 71, 3, 8, 4, 0, 71, 13, 1,
+		0, 0, 0, 72, 73, 5, 1, 0, 0, 73, 78, 3, 8, 4, 0, 74, 75, 5, 2, 0, 0, 75,
+		77, 3, 8, 4, 0, 76, 74, 1, 0, 0, 0, 77, 80, 1, 0, 0, 0, 78, 76, 1, 0, 0,
+		0, 78, 79, 1, 0, 0, 0, 79, 81, 1, 0, 0, 0, 80, 78, 1, 0, 0, 0, 81, 82,
+		5, 3, 0, 0, 82, 86, 1, 0, 0, 0, 83, 84, 5, 1, 0, 0, 84, 86, 5, 3, 0, 0,
+		85, 72, 1, 0, 0, 0, 85, 83, 1, 0, 0, 0, 86, 15, 1, 0, 0, 0, 7, 20, 37,
+		51, 59, 66, 78, 85,
+	}
+	deserializer := antlr.NewATNDeserializer(nil)
+	staticData.atn = deserializer.Deserialize(staticData.serializedATN)
+	atn := staticData.atn
+	staticData.decisionToDFA = make([]*antlr.DFA, len(atn.DecisionToState))
+	decisionToDFA := staticData.decisionToDFA
+	for index, state := range atn.DecisionToState {
+		decisionToDFA[index] = antlr.NewDFA(state, index)
+	}
+}
+
+// AgeParserInit initializes any static state used to implement AgeParser. By default the
+// static state used to implement the parser is lazily initialized during the first call to
+// NewAgeParser(). You can call this function if you wish to initialize the static state ahead
+// of time.
+func AgeParserInit() {
+	staticData := &ageParserStaticData
+	staticData.once.Do(ageParserInit)
+}
+
+// NewAgeParser produces a new parser instance for the optional input antlr.TokenStream.
+func NewAgeParser(input antlr.TokenStream) *AgeParser {
+	AgeParserInit()
+	this := new(AgeParser)
+	this.BaseParser = antlr.NewBaseParser(input)
+	staticData := &ageParserStaticData
+	this.Interpreter = antlr.NewParserATNSimulator(this, staticData.atn, staticData.decisionToDFA, staticData.predictionContextCache)
+	this.RuleNames = staticData.ruleNames
+	this.LiteralNames = staticData.literalNames
+	this.SymbolicNames = staticData.symbolicNames
+	this.GrammarFileName = "java-escape"
 
 	return this
 }
@@ -187,7 +189,13 @@ func NewAgeoutContext(parser antlr.Parser, parent antlr.ParserRuleContext, invok
 func (s *AgeoutContext) GetParser() antlr.Parser { return s.parser }
 
 func (s *AgeoutContext) Value() IValueContext {
-	var t = s.GetTypedRuleContext(reflect.TypeOf((*IValueContext)(nil)).Elem(), 0)
+	var t antlr.RuleContext
+	for _, ctx := range s.GetChildren() {
+		if _, ok := ctx.(IValueContext); ok {
+			t = ctx.(antlr.RuleContext)
+			break
+		}
+	}
 
 	if t == nil {
 		return nil
@@ -197,7 +205,13 @@ func (s *AgeoutContext) Value() IValueContext {
 }
 
 func (s *AgeoutContext) Vertex() IVertexContext {
-	var t = s.GetTypedRuleContext(reflect.TypeOf((*IVertexContext)(nil)).Elem(), 0)
+	var t antlr.RuleContext
+	for _, ctx := range s.GetChildren() {
+		if _, ok := ctx.(IVertexContext); ok {
+			t = ctx.(antlr.RuleContext)
+			break
+		}
+	}
 
 	if t == nil {
 		return nil
@@ -207,7 +221,13 @@ func (s *AgeoutContext) Vertex() IVertexContext {
 }
 
 func (s *AgeoutContext) Edge() IEdgeContext {
-	var t = s.GetTypedRuleContext(reflect.TypeOf((*IEdgeContext)(nil)).Elem(), 0)
+	var t antlr.RuleContext
+	for _, ctx := range s.GetChildren() {
+		if _, ok := ctx.(IEdgeContext); ok {
+			t = ctx.(antlr.RuleContext)
+			break
+		}
+	}
 
 	if t == nil {
 		return nil
@@ -217,7 +237,13 @@ func (s *AgeoutContext) Edge() IEdgeContext {
 }
 
 func (s *AgeoutContext) Path() IPathContext {
-	var t = s.GetTypedRuleContext(reflect.TypeOf((*IPathContext)(nil)).Elem(), 0)
+	var t antlr.RuleContext
+	for _, ctx := range s.GetChildren() {
+		if _, ok := ctx.(IPathContext); ok {
+			t = ctx.(antlr.RuleContext)
+			break
+		}
+	}
 
 	if t == nil {
 		return nil
@@ -257,6 +283,9 @@ func (s *AgeoutContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
 }
 
 func (p *AgeParser) Ageout() (localctx IAgeoutContext) {
+	this := p
+	_ = this
+
 	localctx = NewAgeoutContext(p, p.GetParserRuleContext(), p.GetState())
 	p.EnterRule(localctx, 0, AgeParserRULE_ageout)
 
@@ -351,7 +380,13 @@ func NewVertexContext(parser antlr.Parser, parent antlr.ParserRuleContext, invok
 func (s *VertexContext) GetParser() antlr.Parser { return s.parser }
 
 func (s *VertexContext) Properties() IPropertiesContext {
-	var t = s.GetTypedRuleContext(reflect.TypeOf((*IPropertiesContext)(nil)).Elem(), 0)
+	var t antlr.RuleContext
+	for _, ctx := range s.GetChildren() {
+		if _, ok := ctx.(IPropertiesContext); ok {
+			t = ctx.(antlr.RuleContext)
+			break
+		}
+	}
 
 	if t == nil {
 		return nil
@@ -395,6 +430,9 @@ func (s *VertexContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
 }
 
 func (p *AgeParser) Vertex() (localctx IVertexContext) {
+	this := p
+	_ = this
+
 	localctx = NewVertexContext(p, p.GetParserRuleContext(), p.GetState())
 	p.EnterRule(localctx, 2, AgeParserRULE_vertex)
 
@@ -466,7 +504,13 @@ func NewEdgeContext(parser antlr.Parser, parent antlr.ParserRuleContext, invokin
 func (s *EdgeContext) GetParser() antlr.Parser { return s.parser }
 
 func (s *EdgeContext) Properties() IPropertiesContext {
-	var t = s.GetTypedRuleContext(reflect.TypeOf((*IPropertiesContext)(nil)).Elem(), 0)
+	var t antlr.RuleContext
+	for _, ctx := range s.GetChildren() {
+		if _, ok := ctx.(IPropertiesContext); ok {
+			t = ctx.(antlr.RuleContext)
+			break
+		}
+	}
 
 	if t == nil {
 		return nil
@@ -510,6 +554,9 @@ func (s *EdgeContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
 }
 
 func (p *AgeParser) Edge() (localctx IEdgeContext) {
+	this := p
+	_ = this
+
 	localctx = NewEdgeContext(p, p.GetParserRuleContext(), p.GetState())
 	p.EnterRule(localctx, 4, AgeParserRULE_edge)
 
@@ -581,12 +628,20 @@ func NewPathContext(parser antlr.Parser, parent antlr.ParserRuleContext, invokin
 func (s *PathContext) GetParser() antlr.Parser { return s.parser }
 
 func (s *PathContext) AllVertex() []IVertexContext {
-	var ts = s.GetTypedRuleContexts(reflect.TypeOf((*IVertexContext)(nil)).Elem())
-	var tst = make([]IVertexContext, len(ts))
+	children := s.GetChildren()
+	len := 0
+	for _, ctx := range children {
+		if _, ok := ctx.(IVertexContext); ok {
+			len++
+		}
+	}
 
-	for i, t := range ts {
-		if t != nil {
+	tst := make([]IVertexContext, len)
+	i := 0
+	for _, ctx := range children {
+		if t, ok := ctx.(IVertexContext); ok {
 			tst[i] = t.(IVertexContext)
+			i++
 		}
 	}
 
@@ -594,7 +649,17 @@ func (s *PathContext) AllVertex() []IVertexContext {
 }
 
 func (s *PathContext) Vertex(i int) IVertexContext {
-	var t = s.GetTypedRuleContext(reflect.TypeOf((*IVertexContext)(nil)).Elem(), i)
+	var t antlr.RuleContext
+	j := 0
+	for _, ctx := range s.GetChildren() {
+		if _, ok := ctx.(IVertexContext); ok {
+			if j == i {
+				t = ctx.(antlr.RuleContext)
+				break
+			}
+			j++
+		}
+	}
 
 	if t == nil {
 		return nil
@@ -608,12 +673,20 @@ func (s *PathContext) KW_PATH() antlr.TerminalNode {
 }
 
 func (s *PathContext) AllEdge() []IEdgeContext {
-	var ts = s.GetTypedRuleContexts(reflect.TypeOf((*IEdgeContext)(nil)).Elem())
-	var tst = make([]IEdgeContext, len(ts))
+	children := s.GetChildren()
+	len := 0
+	for _, ctx := range children {
+		if _, ok := ctx.(IEdgeContext); ok {
+			len++
+		}
+	}
 
-	for i, t := range ts {
-		if t != nil {
+	tst := make([]IEdgeContext, len)
+	i := 0
+	for _, ctx := range children {
+		if t, ok := ctx.(IEdgeContext); ok {
 			tst[i] = t.(IEdgeContext)
+			i++
 		}
 	}
 
@@ -621,7 +694,17 @@ func (s *PathContext) AllEdge() []IEdgeContext {
 }
 
 func (s *PathContext) Edge(i int) IEdgeContext {
-	var t = s.GetTypedRuleContext(reflect.TypeOf((*IEdgeContext)(nil)).Elem(), i)
+	var t antlr.RuleContext
+	j := 0
+	for _, ctx := range s.GetChildren() {
+		if _, ok := ctx.(IEdgeContext); ok {
+			if j == i {
+				t = ctx.(antlr.RuleContext)
+				break
+			}
+			j++
+		}
+	}
 
 	if t == nil {
 		return nil
@@ -661,6 +744,9 @@ func (s *PathContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
 }
 
 func (p *AgeParser) Path() (localctx IPathContext) {
+	this := p
+	_ = this
+
 	localctx = NewPathContext(p, p.GetParserRuleContext(), p.GetState())
 	p.EnterRule(localctx, 6, AgeParserRULE_path)
 	var _la int
@@ -791,7 +877,13 @@ func (s *ValueContext) NULL() antlr.TerminalNode {
 }
 
 func (s *ValueContext) Properties() IPropertiesContext {
-	var t = s.GetTypedRuleContext(reflect.TypeOf((*IPropertiesContext)(nil)).Elem(), 0)
+	var t antlr.RuleContext
+	for _, ctx := range s.GetChildren() {
+		if _, ok := ctx.(IPropertiesContext); ok {
+			t = ctx.(antlr.RuleContext)
+			break
+		}
+	}
 
 	if t == nil {
 		return nil
@@ -801,7 +893,13 @@ func (s *ValueContext) Properties() IPropertiesContext {
 }
 
 func (s *ValueContext) Arr() IArrContext {
-	var t = s.GetTypedRuleContext(reflect.TypeOf((*IArrContext)(nil)).Elem(), 0)
+	var t antlr.RuleContext
+	for _, ctx := range s.GetChildren() {
+		if _, ok := ctx.(IArrContext); ok {
+			t = ctx.(antlr.RuleContext)
+			break
+		}
+	}
 
 	if t == nil {
 		return nil
@@ -841,6 +939,9 @@ func (s *ValueContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
 }
 
 func (p *AgeParser) Value() (localctx IValueContext) {
+	this := p
+	_ = this
+
 	localctx = NewValueContext(p, p.GetParserRuleContext(), p.GetState())
 	p.EnterRule(localctx, 8, AgeParserRULE_value)
 
@@ -966,12 +1067,20 @@ func NewPropertiesContext(parser antlr.Parser, parent antlr.ParserRuleContext, i
 func (s *PropertiesContext) GetParser() antlr.Parser { return s.parser }
 
 func (s *PropertiesContext) AllPair() []IPairContext {
-	var ts = s.GetTypedRuleContexts(reflect.TypeOf((*IPairContext)(nil)).Elem())
-	var tst = make([]IPairContext, len(ts))
+	children := s.GetChildren()
+	len := 0
+	for _, ctx := range children {
+		if _, ok := ctx.(IPairContext); ok {
+			len++
+		}
+	}
 
-	for i, t := range ts {
-		if t != nil {
+	tst := make([]IPairContext, len)
+	i := 0
+	for _, ctx := range children {
+		if t, ok := ctx.(IPairContext); ok {
 			tst[i] = t.(IPairContext)
+			i++
 		}
 	}
 
@@ -979,7 +1088,17 @@ func (s *PropertiesContext) AllPair() []IPairContext {
 }
 
 func (s *PropertiesContext) Pair(i int) IPairContext {
-	var t = s.GetTypedRuleContext(reflect.TypeOf((*IPairContext)(nil)).Elem(), i)
+	var t antlr.RuleContext
+	j := 0
+	for _, ctx := range s.GetChildren() {
+		if _, ok := ctx.(IPairContext); ok {
+			if j == i {
+				t = ctx.(antlr.RuleContext)
+				break
+			}
+			j++
+		}
+	}
 
 	if t == nil {
 		return nil
@@ -1019,6 +1138,9 @@ func (s *PropertiesContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
 }
 
 func (p *AgeParser) Properties() (localctx IPropertiesContext) {
+	this := p
+	_ = this
+
 	localctx = NewPropertiesContext(p, p.GetParserRuleContext(), p.GetState())
 	p.EnterRule(localctx, 10, AgeParserRULE_properties)
 	var _la int
@@ -1134,7 +1256,13 @@ func (s *PairContext) STRING() antlr.TerminalNode {
 }
 
 func (s *PairContext) Value() IValueContext {
-	var t = s.GetTypedRuleContext(reflect.TypeOf((*IValueContext)(nil)).Elem(), 0)
+	var t antlr.RuleContext
+	for _, ctx := range s.GetChildren() {
+		if _, ok := ctx.(IValueContext); ok {
+			t = ctx.(antlr.RuleContext)
+			break
+		}
+	}
 
 	if t == nil {
 		return nil
@@ -1174,6 +1302,9 @@ func (s *PairContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
 }
 
 func (p *AgeParser) Pair() (localctx IPairContext) {
+	this := p
+	_ = this
+
 	localctx = NewPairContext(p, p.GetParserRuleContext(), p.GetState())
 	p.EnterRule(localctx, 12, AgeParserRULE_pair)
 
@@ -1249,12 +1380,20 @@ func NewArrContext(parser antlr.Parser, parent antlr.ParserRuleContext, invoking
 func (s *ArrContext) GetParser() antlr.Parser { return s.parser }
 
 func (s *ArrContext) AllValue() []IValueContext {
-	var ts = s.GetTypedRuleContexts(reflect.TypeOf((*IValueContext)(nil)).Elem())
-	var tst = make([]IValueContext, len(ts))
+	children := s.GetChildren()
+	len := 0
+	for _, ctx := range children {
+		if _, ok := ctx.(IValueContext); ok {
+			len++
+		}
+	}
 
-	for i, t := range ts {
-		if t != nil {
+	tst := make([]IValueContext, len)
+	i := 0
+	for _, ctx := range children {
+		if t, ok := ctx.(IValueContext); ok {
 			tst[i] = t.(IValueContext)
+			i++
 		}
 	}
 
@@ -1262,7 +1401,17 @@ func (s *ArrContext) AllValue() []IValueContext {
 }
 
 func (s *ArrContext) Value(i int) IValueContext {
-	var t = s.GetTypedRuleContext(reflect.TypeOf((*IValueContext)(nil)).Elem(), i)
+	var t antlr.RuleContext
+	j := 0
+	for _, ctx := range s.GetChildren() {
+		if _, ok := ctx.(IValueContext); ok {
+			if j == i {
+				t = ctx.(antlr.RuleContext)
+				break
+			}
+			j++
+		}
+	}
 
 	if t == nil {
 		return nil
@@ -1302,6 +1451,9 @@ func (s *ArrContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
 }
 
 func (p *AgeParser) Arr() (localctx IArrContext) {
+	this := p
+	_ = this
+
 	localctx = NewArrContext(p, p.GetParserRuleContext(), p.GetState())
 	p.EnterRule(localctx, 14, AgeParserRULE_arr)
 	var _la int

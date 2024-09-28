@@ -17,18 +17,15 @@
  * under the License.
  */
 
--- complain if script is sourced in psql, rather than via CREATE EXTENSION
-\echo Use "ALTER EXTENSION age UPDATE TO '0.6.0'" to load this file. \quit
+LOAD 'age';
+SET search_path TO ag_catalog;
 
-CREATE OR REPLACE FUNCTION ag_catalog.age_vle(IN agtype, IN agtype, IN agtype,
-                                              IN agtype, IN agtype, IN agtype,
-                                              IN agtype, OUT edges agtype)
-RETURNS SETOF agtype
-LANGUAGE C
-IMMUTABLE
-STRICT
-AS 'MODULE_PATHNAME';
+SELECT create_graph('cypher');
 
---
--- End
---
+SELECT * from cypher('cypher', $$ CREATE (a {x:1})-[:foo]->(b {x:2}),(c {x:3}) $$) as (v0 agtype);
+
+SELECT * from cypher('cypher', $$ MATCH ()-[a:foo]->(), (b {x:2}),(c {x:3}) MERGE (b)-[d:bar]->(c) RETURN d $$) as (v0 agtype);
+
+SELECT * from cypher('cypher', $$ MATCH (x)-[a:foo]->(), (b {x:2}),(c {x:3}) MERGE (b)-[d:bar]->(c) RETURN d $$) as (v0 agtype);
+
+SELECT * from cypher('cypher', $$ MATCH ()-[a:foo]->(y), (b {x:2}),(c {x:3}) MERGE (b)-[d:bar]->(c) RETURN d $$) as (v0 agtype);

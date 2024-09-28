@@ -29,11 +29,14 @@ import java.sql.Statement;
 import org.apache.age.jdbc.base.Agtype;
 import org.apache.age.jdbc.base.AgtypeFactory;
 import org.apache.age.jdbc.base.InvalidAgtypeException;
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.postgresql.jdbc.PgConnection;
+import org.junit.jupiter.api.TestInstance;
+import org.junit.jupiter.api.TestInstance.Lifecycle;
 
+@TestInstance(Lifecycle.PER_CLASS)
 /**
  * Tests the different combinations that are possible when running Statements and Prepared
  * Statements with the AgType and shows how the JDBC needs to be setup to convert values to the
@@ -43,12 +46,12 @@ class AgtypeStatementTest {
 
     BaseDockerizedTest baseDockerizedTest = new BaseDockerizedTest();
 
-    @BeforeEach
+    @BeforeAll
     public void setup() throws Exception {
         baseDockerizedTest.beforeAll();
     }
 
-    @AfterEach
+    @AfterAll
     void tearDown() throws Exception {
         baseDockerizedTest.afterAll();
     }
@@ -56,7 +59,7 @@ class AgtypeStatementTest {
     /**
      * When a statement is run first, "ag_catalog"."agtype" needs to be added to the connection.
      *
-     * @throws SQLException Throws an SQL Exepction if the driver is unable to parse Agtype.
+     * @throws SQLException Throws an SQL Exception if the driver is unable to parse Agtype.
      */
     @Test
     void agTypeInStatementAsString() throws SQLException, InvalidAgtypeException {
@@ -69,7 +72,7 @@ class AgtypeStatementTest {
      * When a Prepared statement is run first and the agtype is a parameter, agtype needs to be
      * added to the connection.
      *
-     * @throws SQLException Throws an SQL Exepction if the driver is unable to parse Agtype.
+     * @throws SQLException Throws an SQL Exception if the driver is unable to parse Agtype.
      */
     @Test
     void asTypeInPreparedStatementAsParameter() throws SQLException, InvalidAgtypeException {
@@ -82,7 +85,7 @@ class AgtypeStatementTest {
      * When a Prepared statement is run first and the agtype is not a parameter, but in the string,
      * "ag_catalog"."agtype" needs to be added to the connection.
      *
-     * @throws SQLException Throws an SQL Exepction if the driver is unable to parse Agtype.
+     * @throws SQLException Throws an SQL Exception if the driver is unable to parse Agtype.
      */
     @Test
     void asTypeInPreparedStatementAsString() throws SQLException, InvalidAgtypeException {
@@ -95,7 +98,7 @@ class AgtypeStatementTest {
      * When a Prepared statement is run and agType is both a string and a parameter, agtype needs to
      * be added to the connection, but "ag_catalog."agtype" does not need to be added.
      *
-     * @throws SQLException Throws an SQL Exepction if the driver is unable to parse Agtype.
+     * @throws SQLException Throws an SQL Exception if the driver is unable to parse Agtype.
      */
     @Test
     void agTypeInPreparedStatementAsStringAndParam() throws SQLException, InvalidAgtypeException {
@@ -111,7 +114,7 @@ class AgtypeStatementTest {
      * When a statement is run first, "ag_catalog"."agType" needs to be added to the connection, no
      * need to add agtype for running a Prepared Statement afterward.
      *
-     * @throws SQLException Throws an SQL Exepction if the driver is unable to parse Agtype.
+     * @throws SQLException Throws an SQL Exception if the driver is unable to parse Agtype.
      */
     @Test
     void asTypeInStatementThenPreparedStatement() throws SQLException, InvalidAgtypeException {
@@ -126,7 +129,7 @@ class AgtypeStatementTest {
      * When a Prepared statement is run first, agtype needs to be added to the connection, no need
      * to add "ag_catalog"."agType" for running a Statement afterward.
      *
-     * @throws SQLException Throws an SQL Exepction if the driver is unable to parse Agtype.
+     * @throws SQLException Throws an SQL Exception if the driver is unable to parse Agtype.
      */
     @Test
     void asTypeInPreparedStatementThenStatement() throws SQLException, InvalidAgtypeException {

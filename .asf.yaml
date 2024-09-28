@@ -43,3 +43,32 @@ github:
     squash:  true
     merge:   false
     rebase:  true
+
+  protected_branches:
+    master:
+      required_pull_request_reviews:
+        required_approving_review_count: 2
+
+    PG16:
+      required_pull_request_reviews:
+        required_approving_review_count: 2
+
+    PG15:
+      required_pull_request_reviews:
+        required_approving_review_count: 2
+
+    PG14:
+      required_pull_request_reviews:
+        required_approving_review_count: 2
+
+    PG13:
+      required_pull_request_reviews:
+        required_approving_review_count: 2
+
+    PG12:
+      required_pull_request_reviews:
+        required_approving_review_count: 2
+
+    PG11:
+      required_pull_request_reviews:
+        required_approving_review_count: 2

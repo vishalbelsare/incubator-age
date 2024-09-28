@@ -21,7 +21,7 @@
 
 #include "parser/cypher_transform_entity.h"
 
-// creates a transform entity
+/* creates a transform entity */
 transform_entity *make_transform_entity(cypher_parsestate *cpstate,
                                         enum transform_entity_type type,
                                         Node *node, Expr *expr)
@@ -38,6 +38,10 @@ transform_entity *make_transform_entity(cypher_parsestate *cpstate,
     else if (entity->type == ENT_EDGE || entity->type == ENT_VLE_EDGE)
     {
         entity->entity.rel = (cypher_relationship *)node;
+    }
+    else if (entity->type == ENT_PATH)
+    {
+        entity->entity.path = (cypher_path *)node;
     }
     else
     {
@@ -62,6 +66,11 @@ transform_entity *find_transform_entity(cypher_parsestate *cpstate,
 {
     ListCell *lc;
 
+    if (name == NULL)
+    {
+        return NULL;
+    }
+
     foreach(lc, cpstate->entities)
     {
         transform_entity *entity = lfirst(lc);
@@ -73,14 +82,21 @@ transform_entity *find_transform_entity(cypher_parsestate *cpstate,
 
         if (type == ENT_VERTEX)
         {
-            if (!strcmp(entity->entity.node->name, name))
+            if (entity->entity.node->name != NULL && !strcmp(entity->entity.node->name, name))
             {
                 return entity;
             }
         }
         else if (type == ENT_EDGE || type == ENT_VLE_EDGE)
         {
-            if (!strcmp(entity->entity.rel->name, name))
+            if (entity->entity.rel->name != NULL && !strcmp(entity->entity.rel->name, name))
+            {
+                return entity;
+            }
+        }
+        else if (type == ENT_PATH)
+        {
+            if (entity->entity.path->var_name != NULL && !strcmp(entity->entity.path->var_name, name))
             {
                 return entity;
             }
@@ -98,35 +114,46 @@ transform_entity *find_variable(cypher_parsestate *cpstate, char *name)
 {
     ListCell *lc;
 
-    foreach (lc, cpstate->entities)
+    /* while we have cypher_parsestates to check */
+    while (cpstate)
     {
-        transform_entity *entity = lfirst(lc);
-        char *entity_name;
+        foreach (lc, cpstate->entities)
+        {
+            transform_entity *entity = lfirst(lc);
+            char *entity_name = NULL;
 
-        if (entity->type == ENT_VERTEX)
-        {
-            entity_name = entity->entity.node->name;
-        }
-        else if (entity->type == ENT_EDGE || entity->type == ENT_VLE_EDGE)
-        {
-            entity_name = entity->entity.rel->name;
-        }
-        else
-        {
-            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                            errmsg("unknown entity type")));
+            if (entity->type == ENT_VERTEX)
+            {
+                entity_name = entity->entity.node->name;
+            }
+            else if (entity->type == ENT_EDGE || entity->type == ENT_VLE_EDGE)
+            {
+                entity_name = entity->entity.rel->name;
+            }
+            else if (entity->type == ENT_PATH)
+            {
+                entity_name = entity->entity.path->var_name;
+            }
+            else
+            {
+                ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                                errmsg("unknown entity type")));
+            }
+
+            if (entity_name != NULL && !strcmp(name, entity_name))
+            {
+                return entity;
+            }
         }
 
-        if (entity_name != NULL && !strcmp(name, entity_name))
-        {
-            return entity;
-        }
+        /* go up to the next parent parse state */
+        cpstate = (cypher_parsestate*)cpstate->pstate.parentParseState;
     }
 
     return NULL;
 }
 
-// helper function that extracts the name associated with the transform_entity.
+/* helper function that extracts the name associated with the transform_entity. */
 char *get_entity_name(transform_entity *entity)
 {
     if (entity->type == ENT_EDGE || entity->type == ENT_VLE_EDGE)
@@ -137,6 +164,10 @@ char *get_entity_name(transform_entity *entity)
     {
         return entity->entity.node->name;
     }
+    else if (entity->type == ENT_PATH)
+    {
+        return entity->entity.path->var_name;
+    }
     else
     {
         ereport(ERROR,
@@ -146,4 +177,35 @@ char *get_entity_name(transform_entity *entity)
     }
 
     return NULL;
+}
+
+/*
+ * Returns entity->expr relative to the current cpstate.
+ *
+ * For example,
+ * If entity is from current cpstate, its levelsup = 0.
+ * If entity is from immediate parent cpstate, its levelsup = 1.
+ * If entity is from parent's parent's cpstate, its levelsup = 2.
+ *
+ * Relative Expr is necessary when entity->expr is a Var and the entity
+ * is not from the current cpstate. In this case, Var->varlevelsup must
+ * reflect the distance between source cpstate of the entity and the
+ * cpstate where the Var is being used.
+ */
+Expr *get_relative_expr(transform_entity *entity, Index levelsup)
+{
+    Var *var;
+    Var *updated_var;
+
+    if (!IsA(entity->expr, Var))
+    {
+        return entity->expr;
+    }
+
+    var = (Var *)entity->expr;
+    updated_var = makeVar(var->varno, var->varattno, var->vartype,
+                          var->vartypmod, var->varcollid,
+                          var->varlevelsup + levelsup);
+
+    return (Expr *)updated_var;
 }

@@ -20,17 +20,15 @@
 #ifndef AG_CYPHER_TRANSFORM_ENTITY_H
 #define AG_CYPHER_TRANSFORM_ENTITY_H
 
-#include "nodes/primnodes.h"
-#include "parser/parse_node.h"
-
-#include "nodes/cypher_nodes.h"
+#include "nodes/makefuncs.h"
 #include "parser/cypher_parse_node.h"
 
 enum transform_entity_type
 {
     ENT_VERTEX = 0x0,
     ENT_EDGE,
-    ENT_VLE_EDGE
+    ENT_VLE_EDGE,
+    ENT_PATH
 };
 
 enum transform_entity_join_side
@@ -48,12 +46,12 @@ enum transform_entity_join_side
  */
 typedef struct
 {
-    // denotes whether this entity is a vertex or edge
+    /* denotes whether this entity is a vertex or edge */
     enum transform_entity_type type;
 
     /*
      * MATCH clauses are transformed into a select * FROM ... JOIN, etc
-     * We need to know wheter the table that this entity represents is
+     * We need to know whether the table that this entity represents is
      * part of the join tree. If a cypher_node does not meet the conditions
      * set in INCLUDE_NODE_IN_JOIN_TREE. Then we can skip the node when
      * constructing our join tree. The entities around this particular entity
@@ -63,7 +61,7 @@ typedef struct
 
     /*
      * The parse data structure will be transformed into an Expr that represents
-     * the entity. When contructing the join tree, we need to know what it was
+     * the entity. When constructing the join tree, we need to know what it was
      * turned into. If the entity was originally created in a previous clause,
      * this will be a Var that we need to reference to extract the id, startid,
      * endid for the join. If the entity was created in the current clause, then
@@ -77,11 +75,12 @@ typedef struct
      * declared by itself or a previous clause.
      */
     bool declared_in_current_clause;
-    // The parse data structure that we transformed
+    /* The parse data structure that we transformed */
     union
     {
         cypher_node *node;
         cypher_relationship *rel;
+        cypher_path *path;
     } entity;
 } transform_entity;
 
@@ -93,5 +92,6 @@ transform_entity *make_transform_entity(cypher_parsestate *cpstate,
                                         enum transform_entity_type type,
                                         Node *node, Expr *expr);
 char *get_entity_name(transform_entity *entity);
+Expr *get_relative_expr(transform_entity *entity, Index levelsup);
 
 #endif

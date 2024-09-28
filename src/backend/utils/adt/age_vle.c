@@ -19,14 +19,14 @@
 
 #include "postgres.h"
 
-#include "catalog/pg_type.h"
+#include "common/hashfn.h"
 #include "funcapi.h"
+#include "utils/datum.h"
 #include "utils/lsyscache.h"
 
 #include "utils/age_vle.h"
 #include "catalog/ag_graph.h"
-#include "utils/graphid.h"
-#include "utils/age_graphid_ds.h"
+#include "catalog/ag_label.h"
 #include "nodes/cypher_nodes.h"
 
 /* defines */
@@ -70,7 +70,10 @@ typedef struct VLE_local_context
     graphid vsid;                  /* starting vertex id */
     graphid veid;                  /* ending vertex id */
     char *edge_label_name;         /* edge label name for match */
+    Oid edge_label_name_oid;       /* edge label name oid for match */
     agtype *edge_property_constraint; /* edge property constraint as agtype */
+    Datum edge_property_constraint_datum; /* edge property constraint as Datum */
+    uint32 edge_property_constraint_hash; /* edge property constraint hash */
     int64 lidx;                    /* lower (start) bound index */
     int64 uidx;                    /* upper (end) bound index */
     bool uidx_infinite;            /* flag if the upper bound is omitted */
@@ -164,7 +167,7 @@ static VLE_local_context *get_cached_VLE_local_context(int64 vle_grammar_node_id
 
             /*
              * Clear (unlink) the previous context's next pointer, if needed.
-             * Also clear prev as we are at the end of avaiable cached contexts
+             * Also clear prev as we are at the end of available cached contexts
              * and just purging them off. Remember, this forms a loop that will
              * exit the while after purging.
              */
@@ -316,7 +319,7 @@ static void create_VLE_local_state_hashtable(VLE_local_context *vlelctx)
                                                 EDGE_STATE_HTAB_INITIAL_SIZE,
                                                 &edge_state_ctl,
                                                 HASH_ELEM | HASH_FUNCTION);
-    pfree(eshn);
+    pfree_if_not_null(eshn);
 }
 
 /*
@@ -330,7 +333,7 @@ static bool is_an_edge_match(VLE_local_context *vlelctx, edge_entry *ee)
     agtype_container *agtc_edge_property_constraint = NULL;
     agtype_iterator *constraint_it = NULL;
     agtype_iterator *property_it = NULL;
-    char *edge_label_name = NULL;
+    Oid edge_label_name_oid = InvalidOid;
     int num_edge_property_constraints = 0;
     int num_edge_properties = 0;
 
@@ -342,13 +345,25 @@ static bool is_an_edge_match(VLE_local_context *vlelctx, edge_entry *ee)
      * We don't care about extra unmatched properties. If there aren't any edge
      * constraints, then the edge passes by default.
      */
-    if (vlelctx->edge_label_name == NULL && num_edge_property_constraints == 0)
+    if (vlelctx->edge_label_name_oid == InvalidOid &&
+        num_edge_property_constraints == 0)
     {
         return true;
     }
 
-    /* get the edge label name from the oid */
-    edge_label_name = get_rel_name(get_edge_entry_label_table_oid(ee));
+    /* get the edge label oid */
+    edge_label_name_oid = get_edge_entry_label_table_oid(ee);
+
+    /*
+     * Check for a label constraint. Remember, if the constraint label oid is
+     * InvalidOid, there isn't one. If there is one, they need to match.
+     */
+    if (vlelctx->edge_label_name_oid != InvalidOid &&
+        vlelctx->edge_label_name_oid != edge_label_name_oid)
+    {
+        return false;
+    }
+
     /* get our edge's properties */
     edge_property = DATUM_GET_AGTYPE_P(get_edge_entry_properties(ee));
     /* get the containers */
@@ -368,11 +383,26 @@ static bool is_an_edge_match(VLE_local_context *vlelctx, edge_entry *ee)
     }
 
     /*
-     * Check for a label constraint. If the label name is NULL, there isn't one.
+     * If the number of constraints are the same as the number of properties,
+     * then the datums would be the same if they match.
      */
-    if (vlelctx->edge_label_name != NULL &&
-        strcmp(vlelctx->edge_label_name, edge_label_name) != 0)
+    if (num_edge_property_constraints == num_edge_properties)
     {
+        Datum edge_props = get_edge_entry_properties(ee);
+        uint32 edge_props_hash = datum_image_hash(edge_props, false, -1);
+
+        /* check the hash first */
+        if (vlelctx->edge_property_constraint_hash == edge_props_hash)
+        {
+            /* if the hashes match, check the datum images */
+            if (datum_image_eq(vlelctx->edge_property_constraint_datum,
+                               edge_props, false, -1))
+            {
+                return true;
+            }
+        }
+
+        /* if we got here they aren't the same */
         return false;
     }
 
@@ -381,7 +411,7 @@ static bool is_an_edge_match(VLE_local_context *vlelctx, edge_entry *ee)
     property_it = agtype_iterator_init(agtc_edge_property);
 
     /* return the value of deep contains */
-    return agtype_deep_contains(&property_it, &constraint_it);
+    return agtype_deep_contains(&property_it, &constraint_it, false);
 }
 
 /*
@@ -403,14 +433,14 @@ static void free_VLE_local_context(VLE_local_context *vlelctx)
     /* free the stored graph name */
     if (vlelctx->graph_name != NULL)
     {
-        pfree(vlelctx->graph_name);
+        pfree_if_not_null(vlelctx->graph_name);
         vlelctx->graph_name = NULL;
     }
 
     /* free the stored edge label name */
     if (vlelctx->edge_label_name != NULL)
     {
-        pfree(vlelctx->edge_label_name);
+        pfree_if_not_null(vlelctx->edge_label_name);
         vlelctx->edge_label_name = NULL;
     }
 
@@ -421,7 +451,7 @@ static void free_VLE_local_context(VLE_local_context *vlelctx)
     /*
      * We need to free the contents of our stacks if the context is not dirty.
      * These stacks are created in a more volatile memory context. If the
-     * process was interupted, they will be garbage collected by PG. The only
+     * process was interrupted, they will be garbage collected by PG. The only
      * time we will ever clean them here is if the cache isn't being used.
      */
     if (vlelctx->is_dirty == false)
@@ -432,15 +462,15 @@ static void free_VLE_local_context(VLE_local_context *vlelctx)
     }
 
     /* free the containers */
-    pfree(vlelctx->dfs_vertex_stack);
-    pfree(vlelctx->dfs_edge_stack);
-    pfree(vlelctx->dfs_path_stack);
+    pfree_if_not_null(vlelctx->dfs_vertex_stack);
+    pfree_if_not_null(vlelctx->dfs_edge_stack);
+    pfree_if_not_null(vlelctx->dfs_path_stack);
     vlelctx->dfs_vertex_stack = NULL;
     vlelctx->dfs_edge_stack = NULL;
     vlelctx->dfs_path_stack = NULL;
 
     /* and finally the context itself */
-    pfree(vlelctx);
+    pfree_if_not_null(vlelctx);
     vlelctx = NULL;
 }
 
@@ -493,6 +523,8 @@ static VLE_local_context *build_local_vle_context(FunctionCallInfo fcinfo,
     VLE_local_context *vlelctx = NULL;
     agtype_value *agtv_temp = NULL;
     agtype_value *agtv_object = NULL;
+    agtype *agt_edge_property_constraint = NULL;
+    Datum d_edge_property_constraint = 0;
     char *graph_name = NULL;
     Oid graph_oid = InvalidOid;
     int64 vle_grammar_node_id = 0;
@@ -500,7 +532,7 @@ static VLE_local_context *build_local_vle_context(FunctionCallInfo fcinfo,
 
     /*
      * Get the VLE grammar node id, if it exists. Remember, we overload the
-     * age_vle function, for now, for backwards compatability
+     * age_vle function, for now, for backwards compatibility
      */
     if (PG_NARGS() == 8)
     {
@@ -522,7 +554,7 @@ static VLE_local_context *build_local_vle_context(FunctionCallInfo fcinfo,
         /*
          * No context change is needed here as the cache entry is in the proper
          * context. Additionally, all of the modifications are either pointers
-         * to objects already in the proper context or primative types that will
+         * to objects already in the proper context or primitive types that will
          * be stored in that context since the memory is allocated there.
          */
 
@@ -715,8 +747,14 @@ static VLE_local_context *build_local_vle_context(FunctionCallInfo fcinfo,
 
     /* get the edge prototype's property conditions */
     agtv_object = GET_AGTYPE_VALUE_OBJECT_VALUE(agtv_temp, "properties");
+    agt_edge_property_constraint = agtype_value_to_agtype(agtv_object);
+
     /* store the properties as an agtype */
-    vlelctx->edge_property_constraint = agtype_value_to_agtype(agtv_object);
+    vlelctx->edge_property_constraint = agt_edge_property_constraint;
+
+    d_edge_property_constraint = AGTYPE_P_GET_DATUM(agt_edge_property_constraint);
+    vlelctx->edge_property_constraint_datum = d_edge_property_constraint;
+    vlelctx->edge_property_constraint_hash = datum_image_hash(d_edge_property_constraint, false, -1);
 
     /* get the edge prototype's label name */
     agtv_temp = GET_AGTYPE_VALUE_OBJECT_VALUE(agtv_temp, "label");
@@ -725,10 +763,14 @@ static VLE_local_context *build_local_vle_context(FunctionCallInfo fcinfo,
     {
         vlelctx->edge_label_name = pnstrdup(agtv_temp->val.string.val,
                                             agtv_temp->val.string.len);
+
+        vlelctx->edge_label_name_oid = get_label_relation(vlelctx->edge_label_name,
+                                                          graph_oid);
     }
     else
     {
         vlelctx->edge_label_name = NULL;
+        vlelctx->edge_label_name_oid = InvalidOid;
     }
 
     /* get the left range index */
@@ -1324,7 +1366,7 @@ static VLE_path_container *create_VLE_path_container(int64 path_size)
     /* allocate the container */
     vpc = palloc0(container_size_bytes);
 
-    /* initialze the PG headers */
+    /* initialize the PG headers */
     SET_VARSIZE(vpc, container_size_bytes);
 
     /* initialize the container */
@@ -1446,7 +1488,12 @@ static VLE_path_container *build_VLE_zero_container(VLE_local_context *vlelctx)
     graphid vid = 0;
 
     /* we should have an empty stack */
-    Assert(get_stack_size(stack) == 0);
+    if (get_stack_size(stack) != 0)
+    {
+        ereport(ERROR,
+                (errcode(ERRCODE_DATA_EXCEPTION),
+                 errmsg("build_VLE_zero_container: stack is not empty")));
+    }
 
     /*
      * Create the container. Note that the path size will always be 1 as this is
@@ -1831,8 +1878,19 @@ Datum age_vle(PG_FUNCTION_ARGS)
  */
 agtype *agt_materialize_vle_path(agtype *agt_arg_vpc)
 {
-    /* convert the agtype_value to agtype and return it */
-    return agtype_value_to_agtype(agtv_materialize_vle_path(agt_arg_vpc));
+    agtype *agt_path = NULL;
+    agtype_value *agtv_path = NULL;
+
+    /* get the path */
+    agtv_path = agtv_materialize_vle_path(agt_arg_vpc);
+
+    /* convert  agtype_value to agtype */
+    agt_path = agtype_value_to_agtype(agtv_path);
+
+    /* free in memory path */
+    pfree_agtype_value(agtv_path);
+
+    return agt_path;
 }
 
 /*
@@ -1892,6 +1950,8 @@ Datum age_match_two_vle_edges(PG_FUNCTION_ARGS)
     left_array_size = left_path->graphid_array_size;
     left_array = GET_GRAPHID_ARRAY_FROM_CONTAINER(left_path);
 
+    PG_FREE_IF_COPY(agt_arg_vpc, 0);
+
     agt_arg_vpc = AG_GET_ARG_AGTYPE_P(1);
 
     if (!AGT_ROOT_IS_BINARY(agt_arg_vpc) ||
@@ -1906,6 +1966,8 @@ Datum age_match_two_vle_edges(PG_FUNCTION_ARGS)
     right_path = (VLE_path_container *)agt_arg_vpc;
     right_array = GET_GRAPHID_ARRAY_FROM_CONTAINER(right_path);
 
+    PG_FREE_IF_COPY(agt_arg_vpc, 1);
+
     if (left_array[left_array_size - 1] != right_array[0])
     {
         PG_RETURN_BOOL(false);
@@ -1916,8 +1978,8 @@ Datum age_match_two_vle_edges(PG_FUNCTION_ARGS)
 
 /*
  * This function is used when we need to know if the passed in id is at the end
- * of a path. The first arg is the path the second is the vertex id to check and
- * the last is a boolean that syas whether to check the start or the end of the
+ * of a path. The first arg is the path, the second is the vertex id to check and
+ * the last is a boolean that says whether to check the start or the end of the
  * vle path.
  */
 PG_FUNCTION_INFO_V1(age_match_vle_edge_to_id_qual);
@@ -2002,7 +2064,7 @@ Datum age_match_vle_edge_to_id_qual(PG_FUNCTION_ARGS)
     {
         ereport(ERROR,
                 (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                 errmsg("match_vle_terminal_edge() arguement 1 must be an agtype integer or a graphid")));
+                 errmsg("match_vle_terminal_edge() argument 1 must be an agtype integer or a graphid")));
     }
 
     pos_agt = AG_GET_ARG_AGTYPE_P(2);
@@ -2085,7 +2147,6 @@ agtype_value *agtv_materialize_vle_edges(agtype *agt_arg_vpc)
     /* build the AGTV_ARRAY of edges from the VLE_path_container */
     agtv_array = build_edge_list(vpc);
 
-    /* convert the agtype_value to agtype and return it */
     return agtv_array;
 
 }
@@ -2242,7 +2303,7 @@ Datum age_match_vle_terminal_edge(PG_FUNCTION_ARGS)
     {
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-             errmsg("match_vle_terminal_edge() arguement 1 must be an agtype integer or a graphid")));
+             errmsg("match_vle_terminal_edge() argument 1 must be an agtype integer or a graphid")));
     }
 
     /* get the veid */
@@ -2272,7 +2333,7 @@ Datum age_match_vle_terminal_edge(PG_FUNCTION_ARGS)
     {
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-             errmsg("match_vle_terminal_edge() arguement 2 must be an agtype integer or a graphid")));
+             errmsg("match_vle_terminal_edge() argument 2 must be an agtype integer or a graphid")));
     }
 
     /* compare the path beginning or end points */
@@ -2369,7 +2430,7 @@ Datum age_build_vle_match_edge(PG_FUNCTION_ARGS)
 /*
  * This function checks the edges in a MATCH clause to see if they are unique or
  * not. Filters out all the paths where the edge uniques rules are not met.
- * Arguements can be a combination of agtype ints and VLE_path_containers.
+ * Arguments can be a combination of agtype ints and VLE_path_containers.
  */
 PG_FUNCTION_INFO_V1(_ag_enforce_edge_uniqueness);
 

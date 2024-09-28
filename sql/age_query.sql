@@ -17,36 +17,52 @@
  * under the License.
  */
 
--- complain if script is sourced in psql, rather than via CREATE EXTENSION
-\echo Use "ALTER EXTENSION age UPDATE TO '1.0.0'" to load this file. \quit
+--
+-- functions for updating clauses
+--
 
-CREATE FUNCTION ag_catalog.load_labels_from_file(graph_name name,
-                                            label_name name,
-                                            file_path text,
-                                            id_field_exists bool default true)
+-- This function is defined as a VOLATILE function to prevent the optimizer
+-- from pulling up Query's for CREATE clauses.
+CREATE FUNCTION ag_catalog._cypher_create_clause(internal)
     RETURNS void
     LANGUAGE c
     AS 'MODULE_PATHNAME';
 
-CREATE FUNCTION ag_catalog.load_edges_from_file(graph_name name,
-                                                label_name name,
-                                                file_path text)
+CREATE FUNCTION ag_catalog._cypher_set_clause(internal)
+    RETURNS void
+    LANGUAGE c
+    AS 'MODULE_PATHNAME';
+
+CREATE FUNCTION ag_catalog._cypher_delete_clause(internal)
     RETURNS void
     LANGUAGE c
     AS 'MODULE_PATHNAME';
 
 CREATE FUNCTION ag_catalog._cypher_merge_clause(internal)
-RETURNS void
+    RETURNS void
+    LANGUAGE c
+    AS 'MODULE_PATHNAME';
+
+--
+-- query functions
+--
+CREATE FUNCTION ag_catalog.cypher(graph_name name = NULL,
+                                  query_string cstring = NULL,
+                                  params agtype = NULL)
+    RETURNS SETOF record
 LANGUAGE c
 AS 'MODULE_PATHNAME';
 
-CREATE FUNCTION ag_catalog.age_unnest(agtype, block_types boolean = false)
-    RETURNS SETOF agtype
-    LANGUAGE c
-    STABLE
+CREATE FUNCTION ag_catalog.get_cypher_keywords(OUT word text, OUT catcode "char",
+                                               OUT catdesc text)
+    RETURNS SETOF record
+LANGUAGE c
+STABLE
+RETURNS NULL ON NULL INPUT
 PARALLEL SAFE
+COST 10
+ROWS 60
 AS 'MODULE_PATHNAME';
-
 --
 -- End
 --

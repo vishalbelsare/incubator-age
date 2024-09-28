@@ -107,7 +107,7 @@ char *get_session_info_cypher_statement(void)
 /* function to return the state of the session info data */
 bool is_session_info_prepared(void)
 {
-    /* is the session infor prepared AND is the pid the same pid */
+    /* is the session info prepared AND is the pid the same pid */
     if (session_info_prepared == true &&
         session_info_pid == getpid())
     {
@@ -125,12 +125,12 @@ void reset_session_info(void)
     {
         if (session_info_graph_name != NULL)
         {
-            pfree(session_info_graph_name);
+            pfree_if_not_null(session_info_graph_name);
         }
 
         if (session_info_cypher_statement != NULL)
         {
-            pfree(session_info_cypher_statement);
+            pfree_if_not_null(session_info_cypher_statement);
         }
     }
 

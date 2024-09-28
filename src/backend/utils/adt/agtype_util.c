@@ -39,9 +39,7 @@
 #include "utils/memutils.h"
 #include "utils/varlena.h"
 
-#include "utils/agtype.h"
 #include "utils/agtype_ext.h"
-#include "utils/graphid.h"
 
 /*
  * Maximum number of elements in an array (or key/value pairs in an object).
@@ -89,6 +87,8 @@ static agtype_value *push_agtype_value_scalar(agtype_parse_state **pstate,
                                               agtype_value *scalar_val);
 static int compare_two_floats_orderability(float8 lhs, float8 rhs);
 static int get_type_sort_priority(enum agtype_value_type type);
+static void pfree_iterator_agtype_value_token(agtype_iterator_token token,
+                                              agtype_value *agtv);
 
 /*
  * Turn an in-memory agtype_value into an agtype for on-disk storage.
@@ -192,26 +192,59 @@ uint32 get_agtype_length(const agtype_container *agtc, int index)
 }
 
 /*
- * Helper function to generate the sort priorty of a type. Larger
+ * Helper function to generate the sort priority of a type. Larger
  * numbers have higher priority.
  */
 static int get_type_sort_priority(enum agtype_value_type type)
 {
-    if (type == AGTV_OBJECT)
+    if (type == AGTV_PATH)
+    {
         return 0;
-    if (type == AGTV_VERTEX)
+    }
+    if (type == AGTV_EDGE)
+    {
         return 1;
-    if (type == AGTV_ARRAY)
+    }
+    if (type == AGTV_VERTEX)
+    {
         return 2;
-    if (type == AGTV_STRING)
+    }
+    if (type == AGTV_OBJECT)
+    {
         return 3;
-    if (type == AGTV_BOOL)
+    }
+    if (type == AGTV_ARRAY)
+    {
         return 4;
-    if (type == AGTV_NUMERIC || type == AGTV_INTEGER || type == AGTV_FLOAT)
+    }
+    if (type == AGTV_STRING)
+    {
         return 5;
-    if (type == AGTV_NULL)
+    }
+    if (type == AGTV_BOOL)
+    {
         return 6;
+    }
+    if (type == AGTV_NUMERIC || type == AGTV_INTEGER || type == AGTV_FLOAT)
+    {
+        return 7;
+    }
+    if (type == AGTV_NULL)
+    {
+        return 8;
+    }
     return -1;
+}
+
+static void pfree_iterator_agtype_value_token(agtype_iterator_token token,
+                                              agtype_value *agtv)
+{
+    if (token == WAGT_KEY ||
+        token == WAGT_VALUE ||
+        token == WAGT_ELEM)
+    {
+        pfree_agtype_value_content(agtv);
+    }
 }
 
 /*
@@ -249,6 +282,10 @@ int compare_agtype_containers_orderability(agtype_container *a,
             if (ra == WAGT_DONE)
             {
                 /* Decisively equal */
+
+                /* free the agtype_values associated with the tokens */
+                pfree_iterator_agtype_value_token(ra, &va);
+                pfree_iterator_agtype_value_token(rb, &vb);
                 break;
             }
 
@@ -260,6 +297,10 @@ int compare_agtype_containers_orderability(agtype_container *a,
                  * initially, at the WAGT_BEGIN_ARRAY and WAGT_BEGIN_OBJECT
                  * tokens.
                  */
+
+                /* free the agtype_values associated with the tokens */
+                pfree_iterator_agtype_value_token(ra, &va);
+                pfree_iterator_agtype_value_token(rb, &vb);
                 continue;
             }
 
@@ -347,13 +388,31 @@ int compare_agtype_containers_orderability(agtype_container *a,
             if (ra == WAGT_END_ARRAY || ra == WAGT_END_OBJECT)
             {
                 res = -1;
+                /* free the agtype_values associated with the tokens */
+                pfree_iterator_agtype_value_token(ra, &va);
+                pfree_iterator_agtype_value_token(rb, &vb);
                 break;
             }
             /* If right side is shorter, greater than */
             if (rb == WAGT_END_ARRAY || rb == WAGT_END_OBJECT)
             {
                 res = 1;
+                /* free the agtype_values associated with the tokens */
+                pfree_iterator_agtype_value_token(ra, &va);
+                pfree_iterator_agtype_value_token(rb, &vb);
                 break;
+            }
+
+            /* Correction step because AGTV_ARRAY might be there just because of the container type */
+            /* Case 1: left side is assigned to an array, right is an object */
+            if(va.type == AGTV_ARRAY && vb.type == AGTV_OBJECT)
+            {
+                ra = agtype_iterator_next(&ita, &va, false);
+            }
+            /* Case 2: left side is an object, right side is assigned to an array */
+            else if(va.type == AGTV_OBJECT && vb.type == AGTV_ARRAY)
+            {
+                rb = agtype_iterator_next(&itb, &vb, false);
             }
 
             Assert(va.type != vb.type);
@@ -365,20 +424,23 @@ int compare_agtype_containers_orderability(agtype_container *a,
                       -1 :
                       1;
         }
+        /* free the agtype_values associated with the tokens */
+        pfree_iterator_agtype_value_token(ra, &va);
+        pfree_iterator_agtype_value_token(rb, &vb);
     } while (res == 0);
 
     while (ita != NULL)
     {
         agtype_iterator *i = ita->parent;
 
-        pfree(ita);
+        pfree_if_not_null(ita);
         ita = i;
     }
     while (itb != NULL)
     {
         agtype_iterator *i = itb->parent;
 
-        pfree(itb);
+        pfree_if_not_null(itb);
         itb = i;
     }
 
@@ -495,7 +557,7 @@ agtype_value *find_agtype_value_from_container(agtype_container *container,
     }
 
     /* Not found */
-    pfree(result);
+    pfree_if_not_null(result);
     return NULL;
 }
 
@@ -526,6 +588,88 @@ agtype_value *get_ith_agtype_value_from_container(agtype_container *container,
                       result);
 
     return result;
+}
+
+/*
+ * Get type of i-th value of an agtype array.
+ */
+enum agtype_value_type get_ith_agtype_value_type(agtype_container *container,
+                                                 uint32 i)
+{
+    enum agtype_value_type type;
+    uint32 nelements;
+    agtentry entry;
+
+    if (!AGTYPE_CONTAINER_IS_ARRAY(container))
+    {
+        ereport(ERROR, (errmsg("container is not an agtype array")));
+    }
+
+    nelements = AGTYPE_CONTAINER_SIZE(container);
+    if (i >= nelements)
+    {
+        ereport(ERROR, (errmsg("index out of bounds")));
+    }
+
+    entry = container->children[i];
+    switch ((entry)&AGTENTRY_TYPEMASK)
+    {
+    case AGTENTRY_IS_STRING:
+        type = AGTV_STRING;
+        break;
+    case AGTENTRY_IS_NUMERIC:
+        type = AGTV_NUMERIC;
+        break;
+    case AGTENTRY_IS_AGTYPE:
+    {
+        char *base_addr;
+        uint32 agt_header;
+        char *base;
+
+        base_addr = (char *)&container->children[nelements];
+        base = base_addr + INTALIGN(get_agtype_offset(container, i));
+        agt_header = *((uint32 *)base);
+
+        switch (agt_header)
+        {
+        case AGT_HEADER_INTEGER:
+            type = AGTV_INTEGER;
+            break;
+        case AGT_HEADER_FLOAT:
+            type = AGTV_FLOAT;
+            break;
+        case AGT_HEADER_VERTEX:
+            type = AGTV_VERTEX;
+            break;
+        case AGT_HEADER_EDGE:
+            type = AGTV_EDGE;
+            break;
+        case AGT_HEADER_PATH:
+            type = AGTV_PATH;
+            break;
+        default:
+            ereport(ERROR, (errmsg("unexpected agt_header type")));
+            break;
+        }
+        break;
+    }
+    case AGTENTRY_IS_BOOL_TRUE:
+        type = AGTV_BOOL;
+        break;
+    case AGTENTRY_IS_BOOL_FALSE:
+        type = AGTV_BOOL;
+        break;
+    case AGTENTRY_IS_NULL:
+        type = AGTV_NULL;
+        break;
+    case AGTENTRY_IS_CONTAINER:
+        type = AGTV_BINARY;
+        break;
+    default:
+        ereport(ERROR, (errmsg("unexpected agtentry type")));
+        break;
+    }
+    return type;
 }
 
 /*
@@ -1073,7 +1217,7 @@ static agtype_iterator *free_and_get_parent(agtype_iterator *it)
 {
     agtype_iterator *v = it->parent;
 
-    pfree(it);
+    pfree_if_not_null(it);
     return v;
 }
 
@@ -1089,7 +1233,9 @@ static agtype_iterator *free_and_get_parent(agtype_iterator *it)
  * "val" is lhs agtype, and m_contained is rhs agtype when called from top
  * level. We determine if m_contained is contained within val.
  */
-bool agtype_deep_contains(agtype_iterator **val, agtype_iterator **m_contained)
+bool agtype_deep_contains(agtype_iterator **val,
+                          agtype_iterator **m_contained,
+                          bool skip_nested)
 {
     agtype_value vval;
     agtype_value vcontained;
@@ -1179,6 +1325,19 @@ bool agtype_deep_contains(agtype_iterator **val, agtype_iterator **m_contained)
                 if (!equals_agtype_scalar_value(lhs_val, &vcontained))
                     return false;
             }
+            else if (skip_nested)
+            {
+                Assert(lhs_val->type == AGTV_BINARY);
+                Assert(vcontained.type == AGTV_BINARY);
+
+                /* We will just check if the rhs value is equal to lhs */
+                if (compare_agtype_containers_orderability(
+                                             lhs_val->val.binary.data,
+                                             vcontained.val.binary.data) != 0)
+                {
+                    return false;
+                }
+            }
             else
             {
                 /* Nested container value (object or array) */
@@ -1212,8 +1371,10 @@ bool agtype_deep_contains(agtype_iterator **val, agtype_iterator **m_contained)
                  * of containment (plus of course the mapped nodes must be
                  * equal).
                  */
-                if (!agtype_deep_contains(&nestval, &nest_contained))
+                if (!agtype_deep_contains(&nestval, &nest_contained, false))
+                {
                     return false;
+                }
             }
         }
     }
@@ -1305,12 +1466,12 @@ bool agtype_deep_contains(agtype_iterator **val, agtype_iterator **m_contained)
                     nest_contained =
                         agtype_iterator_init(vcontained.val.binary.data);
 
-                    contains = agtype_deep_contains(&nestval, &nest_contained);
+                    contains = agtype_deep_contains(&nestval, &nest_contained, false);
 
                     if (nestval)
-                        pfree(nestval);
+                        pfree_if_not_null(nestval);
                     if (nest_contained)
-                        pfree(nest_contained);
+                        pfree_if_not_null(nest_contained);
                     if (contains)
                         break;
                 }
@@ -1577,27 +1738,54 @@ int compare_agtype_scalar_values(agtype_value *a, agtype_value *b)
         case AGTV_NULL:
             return 0;
         case AGTV_STRING:
-            return varstr_cmp(a->val.string.val, a->val.string.len,
-                              b->val.string.val, b->val.string.len,
-                              DEFAULT_COLLATION_OID);
+        {
+            /* varstr_cmp isn't guaranteed to return 1, 0, -1 */
+            int result = varstr_cmp(a->val.string.val, a->val.string.len,
+                                    b->val.string.val, b->val.string.len,
+                                    DEFAULT_COLLATION_OID);
+            if (result > 0)
+            {
+                return 1;
+            }
+            else if (result < 0)
+            {
+                return -1;
+            }
+            else
+            {
+                return 0;
+            }
+        }
         case AGTV_NUMERIC:
             return DatumGetInt32(DirectFunctionCall2(
                 numeric_cmp, PointerGetDatum(a->val.numeric),
                 PointerGetDatum(b->val.numeric)));
         case AGTV_BOOL:
             if (a->val.boolean == b->val.boolean)
+            {
                 return 0;
+            }
             else if (a->val.boolean > b->val.boolean)
+            {
                 return 1;
+            }
             else
+            {
                 return -1;
+            }
         case AGTV_INTEGER:
             if (a->val.int_value == b->val.int_value)
+            {
                 return 0;
+            }
             else if (a->val.int_value > b->val.int_value)
+            {
                 return 1;
+            }
             else
+            {
                 return -1;
+            }
         case AGTV_FLOAT:
             return compare_two_floats_orderability(a->val.float_value,
                                                    b->val.float_value);
@@ -1614,11 +1802,17 @@ int compare_agtype_scalar_values(agtype_value *a, agtype_value *b)
             b_graphid = b_id->val.int_value;
 
             if (a_graphid == b_graphid)
+            {
                 return 0;
+            }
             else if (a_graphid > b_graphid)
+            {
                 return 1;
+            }
             else
+            {
                 return -1;
+            }
         }
         case AGTV_PATH:
         {
@@ -1638,7 +1832,9 @@ int compare_agtype_scalar_values(agtype_value *a, agtype_value *b)
                 res = compare_agtype_scalar_values(&a_elem, &b_elem);
 
                 if (res)
+                {
                     return res;
+                }
             }
 
             return 0;
@@ -1650,12 +1846,16 @@ int compare_agtype_scalar_values(agtype_value *a, agtype_value *b)
     }
     /* check for integer compared to float */
     if (a->type == AGTV_INTEGER && b->type == AGTV_FLOAT)
+    {
         return compare_two_floats_orderability((float8)a->val.int_value,
                                                b->val.float_value);
+    }
     /* check for float compared to integer */
     if (a->type == AGTV_FLOAT && b->type == AGTV_INTEGER)
+    {
         return compare_two_floats_orderability(a->val.float_value,
                                                (float8)b->val.int_value);
+    }
     /* check for integer or float compared to numeric */
     if (is_numeric_result(a, b))
     {
@@ -2230,4 +2430,188 @@ char *agtype_value_type_to_string(enum agtype_value_type type)
     }
 
     return NULL;
+}
+
+/*
+ * Deallocates the passed agtype_value recursively.
+ */
+void pfree_agtype_value(agtype_value* value)
+{
+    pfree_agtype_value_content(value);
+    pfree_if_not_null(value);
+}
+
+/*
+ * Helper function that recursively deallocates the contents
+ * of the passed agtype_value only. It does not deallocate
+ * `value` itself.
+ */
+void pfree_agtype_value_content(agtype_value* value)
+{
+    int i;
+
+    /* guards against stack overflow due to deeply nested agtype_value */
+    check_stack_depth();
+
+    switch (value->type)
+    {
+        case AGTV_NUMERIC:
+            pfree_if_not_null(value->val.numeric);
+            break;
+
+        case AGTV_STRING:
+            /*
+             * The char pointer (val.string.val) is not free'd because
+             * it is not allocated by an agtype helper function.
+             */
+            pfree_if_not_null(value->val.string.val);
+            break;
+
+        case AGTV_ARRAY:
+        case AGTV_PATH:
+            for (i = 0; i < value->val.array.num_elems; i++)
+            {
+                pfree_agtype_value_content(&value->val.array.elems[i]);
+            }
+            pfree_if_not_null(value->val.array.elems);
+            break;
+
+        case AGTV_OBJECT:
+        case AGTV_VERTEX:
+        case AGTV_EDGE:
+            for (i = 0; i < value->val.object.num_pairs; i++)
+            {
+                pfree_agtype_value_content(&value->val.object.pairs[i].key);
+                pfree_agtype_value_content(&value->val.object.pairs[i].value);
+            }
+            pfree_if_not_null(value->val.object.pairs);
+            break;
+
+        case AGTV_BINARY:
+            pfree_if_not_null(value->val.binary.data);
+            break;
+
+        case AGTV_NULL:
+        case AGTV_INTEGER:
+        case AGTV_FLOAT:
+        case AGTV_BOOL:
+            /*
+             * These are deallocated by the calling function.
+             */
+            break;
+
+        default:
+            ereport(ERROR,
+                    (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                     errmsg("unknown agtype")));
+            break;
+    }
+}
+
+void pfree_agtype_in_state(agtype_in_state* value)
+{
+    pfree_agtype_value(value->res);
+    free(value->parse_state);
+}
+
+/*
+ * helper function that recursively unpacks the agtype_value to be copied
+ * and pushes the scalar values into the copied agtype_value.
+ * this helps skip the serialization part at some places where the original
+ * properties passed to the function are in agtype_value format and
+ * converting it to agtype for iteration can be expensive.
+ * the caller of this function will need to push start and end object tokens
+ * on its own as this function might be used in places where pushing only start
+ * object token at top level is required (for example in alter_properties)
+ */
+void copy_agtype_value(agtype_parse_state* pstate,
+                       agtype_value* original_agtype_value,
+                       agtype_value **copied_agtype_value, bool is_top_level)
+{
+    int i = 0;
+
+    /*
+     * guards against stack overflow due to deeply nested agtype_value
+     */
+    check_stack_depth();
+
+    /*
+     * directly pass the agtype_value to be pushed into the copied result
+     * if type is scalar or binary (array or object) as push_agtype_value
+     * can unpack binary on its own
+     */
+    if (IS_A_AGTYPE_SCALAR(original_agtype_value) ||
+        original_agtype_value->type == AGTV_BINARY)
+    {
+        *copied_agtype_value = push_agtype_value(&pstate, WAGT_ELEM,
+                                                 original_agtype_value);
+    }
+    /*
+     * if the passed in type is object or array, unpack it
+     * until we are left with a scalar value to push to copied result
+     */
+    else if (original_agtype_value->type == AGTV_OBJECT)
+    {
+        if (!is_top_level)
+        {
+            *copied_agtype_value = push_agtype_value(&pstate,
+                                                     WAGT_BEGIN_OBJECT,
+                                                     NULL);
+        }
+
+        for (; i < original_agtype_value->val.object.num_pairs; i ++)
+        {
+            agtype_pair *pair = original_agtype_value->val.object.pairs + i;
+            *copied_agtype_value = push_agtype_value(&pstate, WAGT_KEY,
+                                                     &pair->key);
+
+            if (IS_A_AGTYPE_SCALAR(&pair->value))
+            {
+                *copied_agtype_value = push_agtype_value(&pstate, WAGT_VALUE,
+                                                         &pair->value);
+            }
+            else
+            {
+                /* do a recursive call once a non-scalar value is reached */
+                copy_agtype_value(pstate, &pair->value, copied_agtype_value,
+                                  false);
+            }
+        }
+
+        if (!is_top_level)
+        {
+            *copied_agtype_value = push_agtype_value(&pstate, WAGT_END_OBJECT,
+                                                     NULL);
+        }
+    }
+    else if (original_agtype_value->type == AGTV_ARRAY)
+    {
+        *copied_agtype_value = push_agtype_value(&pstate, WAGT_BEGIN_ARRAY,
+                                                 NULL);
+
+        for (; i < original_agtype_value->val.array.num_elems; i++)
+        {
+            agtype_value elem = original_agtype_value->val.array.elems[i];
+
+            if (IS_A_AGTYPE_SCALAR(&elem))
+            {
+                *copied_agtype_value = push_agtype_value(&pstate, WAGT_ELEM,
+                                                         &elem);
+            }
+            else
+            {
+                /* do a recursive call once a non-scalar value is reached */
+                copy_agtype_value(pstate, &elem, copied_agtype_value, false);
+            }
+        }
+
+        *copied_agtype_value = push_agtype_value(&pstate, WAGT_END_ARRAY,
+                                                 NULL);
+    }
+    else
+    {
+        ereport(ERROR,
+                (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                 errmsg("invalid type provided for copy_agtype_value")));
+    }
 }
